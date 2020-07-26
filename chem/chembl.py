@@ -265,14 +265,14 @@ class ChEMBLFewShot(pl.LightningModule):
         parser.add_argument("--features_generator", type=str, nargs="+", default=None)
         parser.add_argument("--use_mpn_features", type="bool", default=True)
         parser.add_argument("--use_mol_features", type="bool", default=True)
-        parser.add_argument("--mpn_hidden_size", type=int, default=512)
+        parser.add_argument("--mpn_hidden_size", type=int, default=128)
         parser.add_argument("--mol_features_size", type=int, default=200)
-        parser.add_argument("--ffnn_hidden_size", type=int, default=512)
-        parser.add_argument("--num_ffnn_layers", type=int, default=3)
+        parser.add_argument("--ffnn_hidden_size", type=int, default=128)
+        parser.add_argument("--num_ffnn_layers", type=int, default=2)
         parser.add_argument("--dropout", type=float, default=0.1)
-        parser.add_argument("--mpn_depth", type=int, default=3)
+        parser.add_argument("--mpn_depth", type=int, default=2)
         parser.add_argument("--undirected_mpn", type="bool", default=False)
-        parser.add_argument("--enc_hidden_size", type=int, default=512)
+        parser.add_argument("--enc_hidden_size", type=int, default=128)
 
         return parser
 
