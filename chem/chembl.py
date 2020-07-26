@@ -142,11 +142,11 @@ class ChEMBLFewShot(pl.LightningModule):
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
 
-    def few_shot_dataloader(self, datasets, max_examples=None):
+    def few_shot_dataloader(self, datasets, batch_size, max_examples=None):
         dataset = torch.utils.data.ConcatDataset(datasets)
         sampler = FewShotSampler(
             task_offsets=dataset.cumulative_sizes,
-            batch_size=self.hparams.batch_size,
+            batch_size=batch_size,
             support_size=self.hparams.k_shot,
             max_examples=max_examples)
         loader = torch.utils.data.DataLoader(
@@ -220,18 +220,21 @@ class ChEMBLFewShot(pl.LightningModule):
     def train_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.train_datasets,
+            batch_size=self.hparams.batch_size,
             max_examples=self.hparams.max_train_samples)
         return loader
 
     def val_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.val_datasets,
+            batch_size=self.hparams.test_batch_size,
             max_examples=self.hparams.max_val_samples)
         return loader
 
     def test_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.test_datasets,
+            batch_size=self.hparams.test_batch_size,
             max_examples=self.hparams.max_test_samples)
         return loader
 
@@ -247,13 +250,14 @@ class ChEMBLFewShot(pl.LightningModule):
         parser.add_argument("--default_root_dir", type=str, default="../logs/chembl/few_shot/random")
 
         parser.add_argument("--num_data_workers", type=int, default=10)
-        parser.add_argument("--batch_size", type=int, default=20)
+        parser.add_argument("--batch_size", type=int, default=32)
+        parser.add_argument("--test_batch_size", type=int, default=20)
         parser.add_argument("--k_shot", type=int, default=10)
         parser.add_argument("--num_classes", type=int, default=2)
 
-        parser.add_argument("--max_train_samples", type=int, default=50000)
-        parser.add_argument("--max_val_samples", type=int, default=5000)
-        parser.add_argument("--max_test_samples", type=int, default=5000)
+        parser.add_argument("--max_train_samples", type=int, default=5000)
+        parser.add_argument("--max_val_samples", type=int, default=50)
+        parser.add_argument("--max_test_samples", type=int, default=50)
 
         parser.add_argument("--train_data", type=str, default="../data/chembl/random/train/*.csv")
         parser.add_argument("--train_features", type=str, default="../data/chembl/random/train/*.npy")

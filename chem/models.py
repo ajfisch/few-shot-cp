@@ -2,7 +2,6 @@
 
 import argparse
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import chembl
@@ -77,154 +76,114 @@ class ProtoNet(PairwiseSimilarity):
         return -distances
 
 
-class RelationNet(PairwiseSimilarity):
+class FinetuneProtoNet(ProtoNet):
 
-    def __init__(self, hparams):
-        super(RelationNet, self).__init__(hparams)
-        self.bilinear = nn.Linear(hparams.enc_hidden_size, hparams.enc_hidden_size)
+    def finetune(self, inputs):
+        mol_graph, mol_features, targets = inputs
 
-    def compute_similarity(self, support_mol_encs, target_mol_encs):
-        batch_size = support_mol_encs.size(0)
-        hidden_size = self.hparams.enc_hidden_size
-        classes = self.hparams.num_classes
+        # [classes * k, hidden_size]
+        mol_encs = self.encoder(mol_graph, mol_features)[:-1]
 
-        # [batch_size, classes, hidden_size]
-        support_mol_encs = support_mol_encs.mean(dim=2)
-        support_mol_encs = self.bilinear(support_mol_encs)
-
-        # [batch_size, classes, hidden_size]
-        target_mol_encs = target_mol_encs.view(-1, 1, hidden_size)
-        target_mol_encs = target_mol_encs.expand(batch_size, classes, hidden_size)
-
-        # [batch_size, classes]
-        scores = (support_mol_encs * target_mol_encs).sum(dim=-1)
-        return scores
-
-
-class SetTransformer(PairwiseSimilarity):
-
-    def __init__(self, hparams):
-        super(SetTransformer, self).__init__(hparams)
-        self.support_emb = nn.Parameter(torch.randn(hparams.enc_hidden_size))
-        self.target_emb = nn.Parameter(torch.randn(hparams.enc_hidden_size))
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hparams.enc_hidden_size, nhead=hparams.num_enc_heads)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=hparams.num_enc_layers)
-
-    def compute_similarity(self, support_mol_encs, target_mol_encs):
+        # [classes * k, hidden_size]
         hidden_size = self.hparams.enc_hidden_size
         k = self.hparams.k_shot
         classes = self.hparams.num_classes
+        mol_encs = mol_encs.view(classes * k, hidden_size)
 
-        support_mol_encs += self.support_emb
-        target_mol_encs += self.target_emb
+        # [classes, k, hidden_size]
+        support_mol_encs = mol_encs.view(classes, k, hidden_size)
 
-        # [batch_size, classes, k + 1, hidden_size]
-        target_mol_encs = target_mol_encs.view(-1, 1, hidden_size)
-        target_mol_encs = target_mol_encs.repeat(1, classes, 1)
-        target_mol_encs = target_mol_encs.view(-1, classes, 1, hidden_size)
-        combined_mol_encs = torch.cat([support_mol_encs, target_mol_encs], dim=2)
+        # [classes, hidden_size]
+        mean_mol_encs = support_mol_encs.mean(dim=1)
 
-        # [batch_size * classes, k + 1, hidden_size]
-        combined_mol_encs_flat = combined_mol_encs.view(-1, k + 1, hidden_size)
+        # [classes * k, classes, hidden_size]
+        support_mol_encs = support_mol_encs.unsqueeze(2).repeat(1, 1, classes, 1)
+        support_mol_encs = support_mol_encs.view(classes * k, classes, hidden_size)
 
-        # [batch_size * classes, k + 1, hidden_size]
-        combined_mol_encs_flat = self.transformer_encoder(combined_mol_encs_flat)
+        # [classes * k, classes, hidden_size]
+        mean_mol_encs = mean_mol_encs.unsqueeze(0).repeat(classes * k, 1, 1)
 
-        # [batch_size, classes, k + 1, hidden_size]
-        combined_mol_encs = combined_mol_encs.view(-1, classes, k + 1, hidden_size)
-
-        # [batch_size, classes, hidden_size]
-        support_mol_encs = combined_mol_encs[:, :, :k, :].mean(dim=2)
-
-        # [batch_size, classes, hidden_size]
-        target_mol_encs = combined_mol_encs[:, :, -1, :]
-
-        # [batch_size * classes]
+        # [classes * k * classes]
         distances_flat = F.pairwise_distance(
             support_mol_encs.view(-1, hidden_size),
-            target_mol_encs.view(-1, hidden_size),
+            mean_mol_encs.view(-1, hidden_size),
             p=2)
 
-        # [batch_size, classes]
-        distances = distances_flat.view(-1, classes)
+        # [classes * k, classes]
+        scores = -distances_flat.view(-1, classes)
 
-        return -distances
+        # [classes * k]
+        targets = targets[:-1].view(classes * k)
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
-        parser.add_argument("--num_enc_heads", type=int, default=4)
-        parser.add_argument("--num_enc_layers", type=int, default=4)
-        return parser
+        loss = F.cross_entropy(scores, targets)
 
-
-class MAML(chembl.ChEMBLFewShot):
-
-    def __init__(self, hparams):
-        super(MAML, self).__init__(hparams)
-        self.classifier = nn.Linear(hparams.enc_hidden_size, hparams.num_classes)
-
-    def forward(self, inputs, mode="train"):
-        mol_graph, mol_features, targets = inputs
-
-        # [classes * k + 1, hidden_size]
-        mol_encs = self.encoder(mol_graph, mol_features)
-
-        # [classes * k + 1, num_classes]
-        scores = self.classifier(mol_encs)
-        if mode == "train":
-            scores = scores[:-1]
-            targets = targets[:-1]
-        else:
-            scores = scores[-1:]
-            targets = targets[-1:]
-
-        # [batch_size]
-        predictions = torch.argmax(scores, dim=1).detach()
-
-        outputs = dict(preds=predictions)
-
-        # Get loss & accuracy.
-        if targets is not None:
-            outputs["loss"] = F.cross_entropy(scores, targets, reduction="none")
-            outputs["acc"] = predictions.eq(targets).float()
-
-        return outputs
+        return loss
 
     def get_outputs(self, inputs):
-        torch.set_grad_enabled(True)
         if self.training:
-            fine_tune_steps = self.hparams.train_fine_tune_steps
-        else:
-            fine_tune_steps = self.hparams.test_fine_tune_steps
+            return self.forward(inputs)
 
-        inner_opt = optim.SGD(self.parameters(), lr=self.hparams.fine_tune_lr)
+        inner_opt = optim.Adam(self.parameters(), lr=self.hparams.fine_tune_lr)
 
         with higher.innerloop_ctx(
             model=self,
             opt=inner_opt,
-            copy_initial_weights=not self.training,
-            track_higher_grads=self.training,
+            copy_initial_weights=True,
+            track_higher_grads=False,
         ) as (fnet, diffopt):
             # Inner loop optimization.
+            initial = fnet.forward(inputs)
+            initial = {k: v.detach() for k, v in initial.items()}
+
+            torch.set_grad_enabled(True)
             fnet.train()
-            for _ in range(fine_tune_steps):
-                train_outputs = fnet(inputs, mode="train")
-                diffopt.step(train_outputs["loss"].mean())
+            for _ in range(self.hparams.fine_tune_steps):
+                loss = fnet.finetune(inputs)
+                diffopt.step(loss)
 
+            import pdb; pdb.set_trace()
             # Test time prediction.
+            torch.set_grad_enabled(False)
             fnet.eval()
-            test_outputs = fnet(inputs, mode="test")
+            final = fnet.forward(inputs)
+            final = {k: v.detach() for k, v in final.items()}
 
-        return test_outputs
+        return {"initial": initial, "final": final}
+
+    def validation_epoch_end(self, outputs):
+        initial_loss = torch.cat([x["initial"]["loss"] for x in outputs]).mean().item()
+        final_loss = torch.cat([x["final"]["loss"] for x in outputs]).mean().item()
+        initial_acc = torch.cat([x["initial"]["acc"] for x in outputs]).mean().item()
+        final_acc = torch.cat([x["final"]["acc"] for x in outputs]).mean().item()
+        tensorboard_logs = {"initial_val_loss": initial_loss,
+                            "final_val_loss": final_loss,
+                            "initial_val_acc": initial_acc,
+                            "final_val_acc": final_acc}
+        tqdm_dict = {"initial_val_acc": initial_acc,
+                     "final_val_acc": final_acc}
+        return {"val_loss": final_loss,
+                "progress_bar": tqdm_dict,
+                "log": tensorboard_logs}
+
+    def test_epoch_end(self, outputs):
+        initial_loss = torch.cat([x["initial"]["loss"] for x in outputs]).mean().item()
+        final_loss = torch.cat([x["final"]["loss"] for x in outputs]).mean().item()
+        initial_acc = torch.cat([x["initial"]["acc"] for x in outputs]).mean().item()
+        final_acc = torch.cat([x["final"]["acc"] for x in outputs]).mean().item()
+        tensorboard_logs = {"initial_test_loss": initial_loss,
+                            "final_test_loss": final_loss,
+                            "initial_test_acc": initial_acc,
+                            "final_test_acc": final_acc}
+        tqdm_dict = {"initial_test_acc": initial_acc,
+                     "final_test_acc": final_acc}
+        return {"test_loss": final_loss,
+                "progress_bar": tqdm_dict,
+                "log": tensorboard_logs}
 
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], conflict_handler="resolve", add_help=False)
-        parser.add_argument("--fine_tune_lr", type=float, default=0.1)
-        parser.add_argument("--train_fine_tune_steps", type=int, default=1)
-        parser.add_argument("--test_fine_tune_steps", type=int, default=5)
-        parser.add_argument("--batch_size", type=int, default=1)
-        parser.add_argument("--accumulate_grad_batches", type=int, default=20)
+        parser.add_argument("--fine_tune_lr", type=float, default=0.001)
+        parser.add_argument("--fine_tune_steps", type=int, default=100)
+        parser.add_argument("--test_batch_size", type=int, default=1)
         return parser
