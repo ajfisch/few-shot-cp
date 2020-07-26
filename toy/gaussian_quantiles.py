@@ -162,11 +162,11 @@ class DeepSet(pytorch_lightning.LightningModule):
         parser.add_argument("--learning_rate", default=0.001, type=float)
         parser.add_argument("--batch_size", default=32, type=int)
         parser.add_argument("--hidden_size", default=32, type=int)
-        parser.add_argument("--pool", default="all", type=str,
-                            choices=["sum", "max", "min", "both"])
+        parser.add_argument("--pool", default="sum", type=str,
+                            choices=["sum", "max", "min", "all"])
         parser.add_argument("--alpha", default=0.9, type=float)
 
-        parser.add_argument("--k_shot", default=100, type=int)
+        parser.add_argument("--k_shot", default=10, type=int)
         parser.add_argument("--num_train_tasks", default=100, type=int)
         parser.add_argument("--num_train_examples", default=1000, type=int)
         parser.add_argument("--num_val_tasks", default=25, type=int)
