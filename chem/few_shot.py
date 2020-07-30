@@ -7,7 +7,7 @@ import models
 
 def main(args):
     pl.seed_everything(args.seed)
-    model = models.FinetuneProtoNet(hparams=args)
+    model = models.ProtoNet(hparams=args)
     print(model)
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.fit(model)
@@ -17,7 +17,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
-    parser = models.FinetuneProtoNet.add_task_specific_args(parser)
-    parser = models.FinetuneProtoNet.add_model_specific_args(parser)
+    parser = models.ProtoNet.add_task_specific_args(parser)
+    parser = models.ProtoNet.add_model_specific_args(parser)
     args = parser.parse_args()
     main(args)
