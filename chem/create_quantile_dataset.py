@@ -1,13 +1,11 @@
 """Create quantile data."""
 
 import argparse
-import json
 import glob
-import functools
+import json
+import models
 import os
 import regex
-
-import models
 import torch
 import tqdm
 
@@ -60,6 +58,7 @@ def run_fold(fold_dir, args):
         num_samples=args.num_samples)
     with open(os.path.join(args.output_dir, "fold_%d.json" % fold_idx), "w") as f:
         for batch in tqdm.tqdm(dataloader, desc="running inference"):
+            batch, (smiles, task) = batch
             batch = model.transfer_batch_to_device(batch, device)
 
             output = model.get_few_shot(batch)
@@ -71,6 +70,8 @@ def run_fold(fold_dir, args):
             input_labels = inputs["targets"].cpu().detach().numpy().tolist()
 
             data_point = dict(
+                task=task,
+                smiles=smiles[:model.hparams.num_support * model.hparams.num_classes],
                 input_scores=input_scores,
                 input_labels=input_labels,
                 output_scores=output_scores,
@@ -94,7 +95,7 @@ if __name__ == "__main__":
     parser.add_argument("--fold_dirs", type=str,
                         default="../data/chembl/random/train_folds/fold_[0-9]*/")
     parser.add_argument("--output_dir", type=str,
-                        default="../data/chembl/random/quantiles/proto/k=10/")
+                        default="../data/chembl/random/quantiles/proto/train_wtask/k=10/")
     parser.add_argument("--num_support", type=int, default=10)
     parser.add_argument("--num_query", type=int, default=600)
     parser.add_argument("--num_workers", type=int, default=10)

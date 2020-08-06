@@ -4,7 +4,6 @@ import argparse
 import csv
 import functools
 import glob
-import math
 import multiprocessing
 import os
 
@@ -17,23 +16,27 @@ import torch.optim as optim
 
 
 def construct_molecule_batch(batch):
-    batch = chemprop.data.data.construct_molecule_batch(batch)
-    mol_graph = batch.batch_graph()
+    smiles = [x.smiles for x in batch]
+    tasks = [x.task for x in batch]
+    assert(len(set(tasks)) == 1)
+    task = tasks[0]
+    inputs = chemprop.data.data.construct_molecule_batch(batch)
+    mol_graph = inputs.batch_graph()
     if mol_graph:
         mol_graph = mol_graph.get_components()
-    mol_features = batch.features()
+    mol_features = inputs.features()
     if mol_features:
         mol_features = torch.from_numpy(np.stack(mol_features)).float()
-    targets = batch.targets()
+    targets = inputs.targets()
     if targets:
         targets = torch.Tensor(targets).view(-1).long()
-    batch = [mol_graph, mol_features, targets]
-    return batch
+    inputs = [mol_graph, mol_features, targets]
+    return inputs, (smiles, task)
 
 
 class FewShotSampler(torch.utils.data.Sampler):
 
-    def __init__(self, task_offsets, batch_size, support_size, max_examples=None):
+    def __init__(self, task_offsets, num_support, num_query, max_examples=None):
         task_sizes = []
         for i in range(len(task_offsets)):
             if i == 0:
@@ -43,10 +46,12 @@ class FewShotSampler(torch.utils.data.Sampler):
             if size % 2 != 0:
                 raise RuntimeError("Expected even sized tasks.")
             task_sizes.append(size)
+        if num_query % 2 != 0:
+            raise RuntimeError("Expected even sized queries.")
         self.task_sizes = task_sizes
         self.task_offsets = task_offsets
-        self.batch_size = batch_size
-        self.support_size = support_size
+        self.num_support = num_support
+        self.num_query = num_query
         self.max_examples = max_examples or float("inf")
 
     def create_example(self):
@@ -55,67 +60,121 @@ class FewShotSampler(torch.utils.data.Sampler):
         # Sample task.
         task_idx = np.random.randint(0, len(self.task_sizes))
 
-        # Sample negative examples.
+        # Set test examples.
+        tests = []
+
+        # Sample negative support.
         start_idx = 0 if task_idx == 0 else self.task_offsets[task_idx - 1]
         end_idx = start_idx + self.task_sizes[task_idx] // 2
         negatives = np.random.choice(
             range(start_idx, end_idx),
-            size=self.support_size,
+            size=self.num_support,
             replace=False)
         example_indices.extend(negatives)
 
-        # Sample positive examples.
+        # Sample negative queries.
+        while len(tests) < self.num_query // 2:
+            test_idx = np.random.randint(start_idx, end_idx)
+            while test_idx in negatives:
+                test_idx = np.random.randint(start_idx, end_idx)
+                tests.append(test_idx)
+
+        # Sample positive support
         start_idx = end_idx
         end_idx = self.task_offsets[task_idx]
         positives = np.random.choice(
             range(start_idx, end_idx),
-            size=self.support_size,
+            size=self.num_support,
             replace=False)
         example_indices.extend(positives)
 
-        # Sample test example.
-        start_idx = 0 if task_idx == 0 else self.task_offsets[task_idx - 1]
-        end_idx = self.task_offsets[task_idx]
-        support = set(positives.tolist() + negatives.tolist())
-        test_idx = np.random.randint(start_idx, end_idx)
-        while test_idx in support:
+        # Sample positive queries.
+        while len(tests) < self.num_query:
             test_idx = np.random.randint(start_idx, end_idx)
-        example_indices.append(test_idx)
+            while test_idx in positives:
+                test_idx = np.random.randint(start_idx, end_idx)
+                tests.append(test_idx)
+        example_indices.extend(tests)
 
         return example_indices
 
     def __iter__(self):
         examples = 0
         while examples < self.max_examples:
-            batch_size = min(self.batch_size, self.max_examples - examples)
-            batch_indices = []
-            for _ in range(batch_size):
-                batch_indices.extend(self.create_example())
-            yield batch_indices
-            examples += batch_size
+            yield self.create_example()
+            examples += 1
 
     def __len__(self):
-        return math.ceil(self.max_examples / self.batch_size)
+        return self.max_examples
 
 
 class ChEMBLFewShot(pl.LightningModule):
 
     def __init__(self, hparams):
         super(ChEMBLFewShot, self).__init__()
+        if isinstance(hparams, dict):
+            hparams = argparse.Namespace(**hparams)
         self.hparams = hparams
         self.encoder = molecules.MoleculeEncoder(hparams)
 
-    def get_outputs(self, inputs):
-        return self.forward(inputs)
+    def get_few_shot(self, inputs):
+        mol_graph, mol_features, targets = inputs
+        mol_encs = self.encoder(mol_graph, mol_features)
+
+        classes = self.hparams.num_classes
+        support = self.hparams.num_support
+
+        support_encs = mol_encs[:classes * support]
+        support_encs = support_encs.view(classes, support, -1)
+        query_encs = mol_encs[classes * support:]
+
+        targets = targets[classes * support:]
+
+        return self.forward(support_encs, query_encs, targets)
+
+    def get_few_shot_calibration(self, inputs):
+        mol_graph, mol_features, targets = inputs
+        mol_encs = self.encoder(mol_graph, mol_features)
+
+        classes = self.hparams.num_classes
+        support = self.hparams.num_support
+
+        support_encs = mol_encs[:classes * support]
+        support_encs = support_encs.view(classes, support, -1)
+        support_targets = targets[:classes * support].view(classes, support)
+        query_encs = mol_encs[classes * support:]
+        query_targets = targets[classes * support:]
+
+        outputs = []
+        for i in range(support):
+            idx = [j != i for j in range(support)]
+            support_encs_cal = support_encs[:, idx]
+            query_encs_cal = torch.cat([support_encs[:, i], query_encs], dim=0)
+            targets_cal = torch.cat([support_targets[:, i], query_targets], dim=0)
+            output = self.forward(support_encs_cal, query_encs_cal, targets_cal)
+            output = dict(
+                loss=output["loss"][:classes].unsqueeze(0),
+                targets=output["targets"][:classes].unsqueeze(0),
+                cv_loss=output["loss"][classes:].unsqueeze(0),
+                cv_targets=output["targets"][classes:].unsqueeze(0))
+            outputs.append(output)
+
+        calibration = {}
+        for k in outputs[0].keys():
+            calibration[k] = torch.cat([x[k] for x in outputs])
+
+        return calibration
 
     def training_step(self, batch, batch_idx):
-        outputs = self.get_outputs(batch)
+        inputs, _ = batch
+        outputs = self.get_few_shot(inputs)
         loss = outputs["loss"].mean()
         tensorboard_logs = {"train_loss": loss.detach()}
         return {"loss": loss, "log": tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
-        return self.get_outputs(batch)
+        inputs, _ = batch
+        return self.get_few_shot(inputs)
 
     def validation_epoch_end(self, outputs):
         loss = torch.cat([x["loss"] for x in outputs]).mean().item()
@@ -129,7 +188,8 @@ class ChEMBLFewShot(pl.LightningModule):
                 "log": tensorboard_logs}
 
     def test_step(self, batch, batch_idx):
-        return self.get_outputs(batch)
+        inputs, _ = batch
+        return self.get_few_shot(inputs)
 
     def test_epoch_end(self, outputs):
         loss = torch.cat([x["loss"] for x in outputs])
@@ -142,17 +202,18 @@ class ChEMBLFewShot(pl.LightningModule):
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
 
-    def few_shot_dataloader(self, datasets, batch_size, max_examples=None):
+    @staticmethod
+    def few_shot_dataloader(datasets, num_query, num_support, num_workers, max_examples=None):
         dataset = torch.utils.data.ConcatDataset(datasets)
         sampler = FewShotSampler(
             task_offsets=dataset.cumulative_sizes,
-            batch_size=batch_size,
-            support_size=self.hparams.k_shot,
+            num_query=num_query,
+            num_support=num_support,
             max_examples=max_examples)
         loader = torch.utils.data.DataLoader(
             dataset=dataset,
             batch_sampler=sampler,
-            num_workers=self.hparams.num_data_workers,
+            num_workers=num_workers,
             collate_fn=construct_molecule_batch)
         return loader
 
@@ -173,6 +234,7 @@ class ChEMBLFewShot(pl.LightningModule):
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             columns = reader.fieldnames
+            task = columns[1]
             positives = []
             negatives = []
             for row in reader:
@@ -186,23 +248,27 @@ class ChEMBLFewShot(pl.LightningModule):
             if len(positives) != len(negatives):
                 raise RuntimeError("Assumed balanced classes. Positives not equal to negatives.")
 
-            data = chemprop.data.MoleculeDataset([
-                chemprop.data.MoleculeDatapoint(
+            data = []
+            for smiles, target in negatives + positives:
+                datapoint = chemprop.data.MoleculeDatapoint(
                     smiles=smiles,
                     targets=[target],
                     features=idx_to_features[smiles_to_idx[smiles]] if features_paths else None,
                     features_generator=features_generator)
-                for smiles, target in negatives + positives])
+                datapoint.task = task
+                data.append(datapoint)
+            data = chemprop.data.MoleculeDataset(data)
 
         return data
 
-    def load_datasets(self, file_pattern, features_pattern=None):
+    @staticmethod
+    def load_datasets(file_pattern, features_pattern=None, features_generator=None, num_workers=0):
         worker_fn = functools.partial(
-            self._load,
+            ChEMBLFewShot._load,
             features_paths=glob.glob(features_pattern) if features_pattern else None,
-            features_generator=self.hparams.features_generator)
+            features_generator=features_generator)
         tasks = glob.glob(file_pattern)
-        num_workers = min(len(tasks), self.hparams.num_data_workers)
+        num_workers = min(len(tasks), num_workers)
         if num_workers > 0:
             workers = multiprocessing.Pool(num_workers)
             datasets = workers.map(worker_fn, tasks)
@@ -214,27 +280,35 @@ class ChEMBLFewShot(pl.LightningModule):
         for split in ["train", "val", "test"]:
             datasets = self.load_datasets(
                 file_pattern=getattr(self.hparams, "%s_data" % split),
-                features_pattern=getattr(self.hparams, "%s_features" % split))
+                features_pattern=getattr(self.hparams, "%s_features" % split),
+                features_generator=self.hparams.features_generator,
+                num_workers=self.hparams.num_data_workers)
             setattr(self, "%s_datasets" % split, datasets)
 
     def train_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.train_datasets,
-            batch_size=self.hparams.batch_size,
+            num_query=self.hparams.train_num_query,
+            num_support=self.hparams.num_support,
+            num_workers=self.hparams.num_data_workers,
             max_examples=self.hparams.max_train_samples)
         return loader
 
     def val_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.val_datasets,
-            batch_size=self.hparams.test_batch_size,
+            num_query=self.hparams.test_num_query,
+            num_support=self.hparams.num_support,
+            num_workers=self.hparams.num_data_workers,
             max_examples=self.hparams.max_val_samples)
         return loader
 
     def test_dataloader(self):
         loader = self.few_shot_dataloader(
             datasets=self.test_datasets,
-            batch_size=self.hparams.test_batch_size,
+            num_query=self.hparams.test_num_query,
+            num_support=self.hparams.num_support,
+            num_workers=self.hparams.num_data_workers,
             max_examples=self.hparams.max_test_samples)
         return loader
 
@@ -245,19 +319,19 @@ class ChEMBLFewShot(pl.LightningModule):
 
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--max_epochs", type=int, default=20)
+        parser.add_argument("--max_epochs", type=int, default=10)
         parser.add_argument("--reload_dataloaders_every_epoch", type="bool", default=True)
         parser.add_argument("--default_root_dir", type=str, default="../logs/chembl/few_shot/random")
 
         parser.add_argument("--num_data_workers", type=int, default=10)
-        parser.add_argument("--batch_size", type=int, default=32)
-        parser.add_argument("--test_batch_size", type=int, default=20)
-        parser.add_argument("--k_shot", type=int, default=10)
+        parser.add_argument("--num_support", type=int, default=10)
         parser.add_argument("--num_classes", type=int, default=2)
+        parser.add_argument("--train_num_query", type=int, default=32)
+        parser.add_argument("--test_num_query", type=int, default=32)
 
-        parser.add_argument("--max_train_samples", type=int, default=5000)
-        parser.add_argument("--max_val_samples", type=int, default=50)
-        parser.add_argument("--max_test_samples", type=int, default=50)
+        parser.add_argument("--max_train_samples", type=int, default=50000)
+        parser.add_argument("--max_val_samples", type=int, default=5000)
+        parser.add_argument("--max_test_samples", type=int, default=5000)
 
         parser.add_argument("--train_data", type=str, default="../data/chembl/random/train/*.csv")
         parser.add_argument("--train_features", type=str, default="../data/chembl/random/train/*.npy")
