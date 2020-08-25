@@ -3,6 +3,7 @@
 import argparse
 import collections
 import json
+import math
 import numpy as np
 import subprocess
 import tqdm
@@ -29,6 +30,7 @@ def load(filename, quantile):
 
             # Add true quantile before modifying output scores.
             entry["true_quantile"] = np.quantile(entry["output_scores"] + [float("inf")], quantile)
+            entry["cdf_scores"] = np.array(sorted(entry["output_scores"] + [float("inf")]))
 
             # Add complement to output_scores.
             output_scores = []
@@ -124,7 +126,7 @@ def compute_baseline(data, epsilon, use_correction=False):
     return dict(accuracy=accuracy_stats, efficiency=efficiency_stats)
 
 
-def compute_meta_conformal(calibration, test, epsilon, bootstrap=False, use_correction=False):
+def compute_meta_conformal_conservative(calibration, test, epsilon, bootstrap=False, use_correction=False):
     # Decide appropriate calibration values based on bootstrap or not.
     alpha = np.sqrt(1 - epsilon)
     if bootstrap:
@@ -201,26 +203,128 @@ def compute_meta_conformal(calibration, test, epsilon, bootstrap=False, use_corr
     return dict(accuracy=accuracy_stats, efficiency=efficiency_stats)
 
 
+def compute_meta_conformal(calibration, test, epsilon):
+    # Target coverage level.
+    target = 1 - epsilon
+
+    # Number of calibration tasks.
+    n = len(calibration)
+    m = len(next(iter(calibration.values()))[0]["cdf_scores"])
+
+    # First, find the CDF of each calibration task's estimate quantile.
+    trials = []
+    cdfs = []
+    p_deltas = []
+    n_deltas = []
+    for task, few_shot_trials in calibration.items():
+        trial_idx = np.random.choice(len(few_shot_trials))
+        trials.append((task, trial_idx))
+        trial = few_shot_trials[trial_idx]
+        pred_quantile = trial["quantile"]
+        rank = (trial["cdf_scores"] <= pred_quantile).sum()
+        for i in range(rank, len(trial["cdf_scores"])):
+            p_deltas.append(trial["cdf_scores"][i] - trial["cdf_scores"][rank - 1])
+        for i in range(rank - 1, -1, -1):
+            n_deltas.append(trial["cdf_scores"][rank - 1] - trial["cdf_scores"][i])
+        cdfs.append(rank / len(trial["cdf_scores"]))
+
+    # Next, find the value of tau that completes the residual.
+    residual = target - 1 / (n + 1) * sum(cdfs)
+    if residual == 0:
+        tau = 0
+    else:
+        if residual > 0:
+            idx = math.ceil(residual * m * (n + 1))
+            deltas = sorted(p_deltas)
+        elif residual < 0:
+            idx = math.floor(-residual * m * (n + 1))
+            deltas = [-d for d in sorted(n_deltas)]
+        if idx < len(deltas):
+            tau = deltas[idx]
+        else:
+            tau = float("inf")
+
+    # Verify that the sum is >= target.
+    inflated_cdf = []
+    for task, task_idx in trials:
+        trial = calibration[task][task_idx]
+        pred_quantile = trial["quantile"] + tau
+        rank = (trial["cdf_scores"] <= pred_quantile).sum()
+        inflated_cdf.append(rank / len(trial["cdf_scores"]))
+    assert(sum(inflated_cdf) / (n + 1) >= target)
+
+    # Next, iterate through the test data, using the inflated quantile.
+    efficiencies = []
+    accuracies = []
+
+    # Run through each of the meta-tasks.
+    for task, few_shot_trials in test.items():
+
+        # Store task accuracies and efficienciess.
+        task_accuracy = []
+        task_efficiency = []
+
+        # For each meta-task, evaluate each of the iterators of few-shot prediction.
+        for trial in few_shot_trials:
+
+            # Store trial accuracies and efficiencies.
+            accuracy = []
+            efficiency = []
+
+            # Each few-shot iteration is evaluated over multiple query samples.
+            for i in range(len(trial["output_scores"])):
+                label = trial["output_labels"][i]
+                quantile = trial["quantile"]
+                prediction = []
+
+                # Check each possible label.
+                for y in [0, 1]:
+                    score = trial["output_scores"][i][y]
+                    if score <= quantile + tau:
+                        prediction.append(y)
+
+                # Compute accuracy and efficiency.
+                accuracy.append(float(label in prediction))
+                efficiency.append(len(prediction))
+
+            # Update task metrics.
+            task_accuracy.append(np.mean(accuracy))
+            task_efficiency.append(np.mean(efficiency))
+
+        # Update meta metrics.
+        accuracies.append(np.mean(task_accuracy))
+        efficiencies.append(np.mean(task_efficiency))
+
+    accuracy_stats = stats(accuracies)
+    efficiency_stats = stats(efficiencies)
+
+    return dict(accuracy=accuracy_stats, efficiency=efficiency_stats)
+
+
 def main(args):
-    data = load(args.data, np.sqrt(1 - args.epsilon))
+    quantile = 1 - args.epsilon
+    # quantile = np.sqrt(quantile)
+
+    data = load(args.data, quantile)
     outputs = []
     num_calibration = int(args.p_calibration * len(data))
-    for _ in range(args.num_trials):
+    for _ in tqdm.tqdm(range(args.num_trials), desc="evaluating trials"):
         tasks = list(data.keys())
         np.random.shuffle(tasks)
         calibration = {k: data[k] for k in tasks[:num_calibration]}
         test = {k: data[k] for k in tasks[num_calibration:]}
-        baseline_metrics = compute_baseline(calibration, args.epsilon, use_correction=True)
-        meta_metrics = compute_meta_conformal(calibration, test, args.epsilon, bootstrap=False)
-        outputs.append((meta_metrics, baseline_metrics))
+        meta = compute_meta_conformal(calibration, test, 1 - quantile)
+        baseline = compute_baseline(calibration, 1 - quantile, use_correction=True)
+        # meta_conservative = compute_meta_conformal_conservative(calibration, test, args.epsilon, bootstrap=False)
+        outputs.append((meta, baseline))
 
-    print(args.epsilon)
+    print(quantile)
     print("META:")
     print(np.mean([o[0]["accuracy"]["avg"] for o in outputs]))
     print(np.mean([o[0]["accuracy"]["std"] for o in outputs]))
     print(np.mean([o[0]["efficiency"]["avg"] for o in outputs]))
     print(np.mean([o[0]["efficiency"]["std"] for o in outputs]))
-
+    print(" ")
     print("Baseline:")
     print(np.mean([o[1]["accuracy"]["avg"] for o in outputs]))
     print(np.mean([o[1]["accuracy"]["std"] for o in outputs]))
