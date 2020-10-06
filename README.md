@@ -28,4 +28,27 @@ def forward(self, query, support, support_targets):
 
 
 2. Train quantiles. Train using nonconformity scores measure on K - 1 support labels. Potentially add encodings of inputs as well (like context augmentation in adaptive risk minimization). Train for 0.95/0.9/0.8/0.7/0.6 quantiles.
+
+```python
+def forward(self, support_scores, support=None, query=None):
+    """Estimate quantile.
+    
+    Args:
+        support_scores: <float>[tasks_per_batch, n_support]
+            Nonconformity scores computed on Kth support example using the other K-1 examples.
+        
+        support: <float>[tasks_per_batch, n_support, dim]
+            Optional. Encodings of support points for few-shot learning.
+            
+        query: <float>[tasks_per_batch, n_query, dim]
+            Optional. Encodings of query points for prediction.
+            
+    Returns:
+        quantile: <float>[tasks_per_batch]
+            Scalar estimate of task quantile give K examples.
+    """
+    ...
+```
+
+
 3. Compute nonconformity scores + quantiles on test data. Apply conformal prediction.
