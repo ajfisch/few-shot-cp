@@ -45,10 +45,11 @@ def forward(self, support_scores, support=None, query=None):
             
     Returns:
         quantile: <float>[tasks_per_batch]
-            Scalar estimate of task quantile give K examples.
+            Scalar estimate of task quantile given K examples.
     """
     ...
 ```
 
+In order to train for the epsilon-quantile overall, we need to optimize alpha * beta = epsilon. For conformalization on the task level, beta can only go as high as 1 - (1 / num_calibration_tasks). Generally will want to hyper-parameter sweep 1 - (i / num_calibration_tasks) for i in [1, 2, 3].
 
 3. Compute nonconformity scores + quantiles on test data. Apply conformal prediction.
