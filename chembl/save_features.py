@@ -26,7 +26,7 @@ def generate_features_for_file(smiles_path, features_path, features_generator, n
     idx_to_features = []
     features_generator = chemprop.features.get_features_generator(features_generator)
     workers = multiprocessing.Pool(num_workers, initializer=init_fn, initargs=(features_generator,))
-    all_smiles = list(chemprop.data.get_smiles(smiles_path))
+    all_smiles = set(chemprop.data.get_smiles(smiles_path))
     with tqdm.tqdm(total=len(all_smiles), desc="generating features") as pbar:
         for i, (smiles, features) in enumerate(workers.imap_unordered(generate_features, all_smiles)):
             smiles_to_idx[smiles] = i

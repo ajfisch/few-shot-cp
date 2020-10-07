@@ -1,7 +1,7 @@
 """Prepare ChEMBL dataset for combinatoric property prediction.
 
 1) Filter valid smiles.
-2) Filter properties that have very low variance.
+2) Filter properties that have low variance/few molecules.
 3) Split molecules randomly to train/dev/test.
 4) Write CSV files.
 """
@@ -16,10 +16,13 @@ import subprocess
 import tqdm
 from rdkit import Chem
 
-CHEMBL_PATH = "/data/scratch/fisch/third_party/chemprop/data/chembl.csv"
+CHEMBL_PATH = "/data/rsg/chemistry/swansonk/antibiotic_moa/data/pchembl_100.csv"
 
 Molecule = collections.namedtuple(
     "Molecule", ["smiles", "targets"])
+
+MoleculeProperty = collections.namedtuple(
+    "Property", ["smiles", "value"])
 
 
 def filter_invalid_smiles(smiles):
@@ -46,26 +49,52 @@ def load_dataset(path):
             smiles = row[smiles_column]
             if filter_invalid_smiles(smiles):
                 continue
-            datapoint = Molecule(smiles, {t: int(row[t]) for t in target_columns if row[t]})
+            datapoint = Molecule(smiles, {t: float(row[t]) for t in target_columns if row[t]})
             dataset.append(datapoint)
 
         return dataset
 
 
-def split_molecules(dataset, args):
-    """Partition molecules into splits."""
-    train_size = int(args.train_p * len(dataset))
-    val_size = int(args.val_p * len(dataset))
+def group_targets(dataset, args):
+    """Map targets to molecules."""
+    targets_to_molecules = collections.defaultdict(list)
+    for mol in dataset:
+        for target, value in mol.targets.items():
+            targets_to_molecules[target].append(
+                MoleculeProperty(mol.smiles, value))
 
-    np.random.shuffle(dataset)
-    train = dataset[:train_size]
-    val = dataset[train_size:train_size + val_size]
-    test = dataset[train_size + val_size:]
+    filtered = {}
+    for target, molecules in targets_to_molecules.items():
+        if len(molecules) < args.min_molecules_per_target:
+            continue
+        if np.std([mol.value for mol in molecules]) < args.min_std_per_target:
+            continue
+        indices = np.random.permutation(len(molecules))[:args.max_molecules_per_target]
+        filtered[target] = [molecules[i] for i in indices]
+
+    return filtered
+
+
+def split_targets(dataset, args):
+    """Partition targets into splits."""
+    val_size = int(args.val_p * len(dataset))
+    test_size = int(args.test_p * len(dataset))
+    train_size = len(dataset) - val_size - test_size
+
+    targets = list(dataset.keys())
+    np.random.shuffle(targets)
+    train_targets = targets[:train_size]
+    val_targets = targets[train_size:train_size + val_size]
+    test_targets = targets[train_size + val_size:]
+
+    train = {t: dataset[t] for t in train_targets}
+    val = {t: dataset[t] for t in val_targets}
+    test = {t: dataset[t] for t in test_targets}
 
     print("=" * 50)
-    print("Num train molecules: %d" % len(train))
-    print("Num val molecules: %d" % len(val))
-    print("Num test molecules: %d" % len(test))
+    print("Num train targets: %d" % len(train))
+    print("Num val targets: %d" % len(val))
+    print("Num test targets: %d" % len(test))
     print("=" * 50)
 
     return train, val, test
@@ -78,62 +107,31 @@ def main(args):
     dataset = load_dataset(args.dataset_file)
 
     # Group by targets.
-    targets = group_targets(dataset, args)
+    dataset = group_targets(dataset, args)
 
     # Split targets into train/val/test.
-    splits = split_targets(targets, args)
+    splits = split_targets(dataset, args)
 
-    # Take only attributes that appear in the train split with over N molecules.
-    train_molecules = molecule_splits[0]
-    all_targets = set([t for mol in train_molecules for t in mol.targets.keys()])
-    positive_counts = collections.defaultdict(int)
-    negative_counts = collections.defaultdict(int)
-    for molecule in train_molecules:
-        for target in all_targets:
-            if target in molecule.targets:
-                if molecule.targets[target] == 0:
-                    negative_counts[target] += 1
-                else:
-                    positive_counts[target] += 1
-
-    # Make sure not all one type.
-    targets = []
-    for t in all_targets:
-        if positive_counts[t] < args.min_positive_molecules_per_target:
-            continue
-        if negative_counts[t] < args.min_negative_molecules_per_target:
-            continue
-        if positive_counts[t] + negative_counts[t] < args.min_molecules_per_target:
-            continue
-        targets.append(t)
-    print("Number of targets: %d" % len(targets))
-
-    # For each split write:
-    # 1) smiles --> targets CSV
-    # 2) combination --> smiles (positive/negative)
+    # Write splits.
     os.makedirs(args.output_dir, exist_ok=True)
     for i, split in enumerate(["train", "val", "test"]):
         molecule_file = os.path.join(args.output_dir, "%s_molecules.csv" % split)
         with open(molecule_file, "w") as f:
             writer = csv.writer(f)
-            writer.writerow(["smiles"] + targets)
-            for molecule in molecule_splits[i]:
-                row = [molecule.smiles]
-                for target in targets:
-                    row.append(str(molecule.targets.get(target, "")))
-                writer.writerow(row)
-
-    with open(os.path.join(args.output_dir, "targets.json"), "w") as f:
-        json.dump(targets, f)
+            writer.writerow(["smiles", "target", "value"])
+            for target, molecules in splits[i].items():
+                for molecule in molecules:
+                    row = [molecule.smiles, target, str(molecule.value)]
+                    writer.writerow(row)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_p", type=float, default=0.6)
-    parser.add_argument("--val_p", type=float, default=0.2)
-    parser.add_argument("--min_positive_molecules_per_target", type=int, default=1)
-    parser.add_argument("--min_negative_molecules_per_target", type=int, default=1)
-    parser.add_argument("--min_molecules_per_target", type=int, default=100)
+    parser.add_argument("--val_p", type=float, default=0.15)
+    parser.add_argument("--test_p", type=float, default=0.15)
+    parser.add_argument("--min_std_per_target", type=float, default=0.5)
+    parser.add_argument("--min_molecules_per_target", type=int, default=300)
+    parser.add_argument("--max_molecules_per_target", type=int, default=1000)
     parser.add_argument("--dataset_file", default=CHEMBL_PATH, type=str,
                         help="Path to ChEMBL dataset.")
     parser.add_argument("--output_dir", default="../data/chembl", type=str,

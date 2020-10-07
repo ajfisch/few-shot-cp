@@ -60,6 +60,7 @@ class FewShotSampler(torch.utils.data.Sampler):
                 size=self.num_support + self.num_query,
                 replace=False)
             batch_indices.extend(example_indices)
+        return batch_indices
 
     def __iter__(self):
         i = 0
@@ -103,7 +104,11 @@ class ConformalMPN(pl.LightningModule):
 
         return (query, support, support_targets), query_targets
 
-    def forward(self, inputs, sizes):
+    def forward(self, inputs, sizes=None):
+        if not sizes:
+            sizes = [self.hparams.tasks_per_batch,
+                     self.hparams.num_support,
+                     self.hparams.num_query]
         inputs, targets = self.encode(inputs, sizes)
 
         # [tasks_per_batch, n_query]
@@ -150,12 +155,12 @@ class ConformalMPN(pl.LightningModule):
             for row in tqdm.tqdm(reader, total=num_lines - 1, desc="reading dataset"):
                 smiles = row[columns[0]]
                 task = row[columns[1]]
-                target = row[columns[2]]
+                value = float(row[columns[2]])
 
                 # Slight misuse of the MoleculeDatapoint to include single target + task id.
                 mol = chemprop.data.MoleculeDatapoint(
                     smiles=smiles,
-                    targets=[target],
+                    targets=[value],
                     features=idx_to_features[smiles_to_idx[smiles]].copy() if features_file else None,
                     features_generator=features_generator)
                 mol.task = task
@@ -180,11 +185,10 @@ class ConformalMPN(pl.LightningModule):
             dataset, indices, tasks = self.load_dataset(
                 dataset_file=getattr(self.hparams, "%s_data" % split),
                 features_file=getattr(self.hparams, "%s_features" % split),
-                features_generator=self.hparams.features_generator,
-                limit=None if split == "train" else self.hparams.subsample_val)
+                features_generator=self.hparams.features_generator)
             setattr(self, "%s_dataset" % split, dataset)
-            setattr(self, "%s_indices" % split, dataset)
-            setattr(self, "%s_tasks" % split, dataset)
+            setattr(self, "%s_indices" % split, indices)
+            setattr(self, "%s_tasks" % split, tasks)
 
     def train_dataloader(self):
         sampler = FewShotSampler(
@@ -232,7 +236,7 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--max_val_iters", type=int, default=100)
         parser.add_argument("--max_epochs", type=int, default=40)
 
-        parser.add_argument("--num_data_workers", type=int, default=20)
+        parser.add_argument("--num_data_workers", type=int, default=12)
         parser.add_argument("--train_data", type=str, default="../data/chembl/train_molecules.csv")
         parser.add_argument("--train_features", type=str, default="../data/chembl/features/train_molecules.npy")
         parser.add_argument("--val_data", type=str, default="../data/chembl/val_molecules.csv")
@@ -241,14 +245,14 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--features_generator", type=str, nargs="+", default=None)
         parser.add_argument("--use_mpn_features", type="bool", default=True)
         parser.add_argument("--use_mol_features", type="bool", default=True)
-        parser.add_argument("--mpn_hidden_size", type=int, default=128)
+        parser.add_argument("--mpn_hidden_size", type=int, default=512)
         parser.add_argument("--mol_features_size", type=int, default=200)
-        parser.add_argument("--ffnn_hidden_size", type=int, default=128)
+        parser.add_argument("--ffnn_hidden_size", type=int, default=1024)
         parser.add_argument("--num_ffnn_layers", type=int, default=3)
         parser.add_argument("--dropout", type=float, default=0.1)
-        parser.add_argument("--mpn_depth", type=int, default=2)
+        parser.add_argument("--mpn_depth", type=int, default=3)
         parser.add_argument("--undirected_mpn", type="bool", default=False)
-        parser.add_argument("--enc_hidden_size", type=int, default=128)
+        parser.add_argument("--enc_hidden_size", type=int, default=64)
 
         return parser
 
