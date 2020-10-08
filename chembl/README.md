@@ -19,3 +19,10 @@ Minimum number of molecules per assay = 10000
 Number of assays = 38
 Number of molecules = 1,058,663
 Path = /data/rsg/chemistry/swansonk/antibiotic_moa/data/pchembl_10000.csv
+
+
+## Steps
+
+1. Preprocess data.
+2. Train nonconformity measures on training data + K folds. Make predictions on K folds.
+3. Train quantile functions.

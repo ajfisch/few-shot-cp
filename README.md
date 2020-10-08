@@ -32,17 +32,17 @@ def forward(self, query, support, support_targets):
 ```python
 def forward(self, support_scores, support=None, query=None):
     """Estimate quantile.
-    
+
     Args:
         support_scores: <float>[tasks_per_batch, n_support]
             Nonconformity scores computed on Kth support example using the other K-1 examples.
-        
+
         support: <float>[tasks_per_batch, n_support, dim]
             Optional. Encodings of support points for few-shot learning.
-            
+
         query: <float>[tasks_per_batch, n_query, dim]
             Optional. Encodings of query points for prediction.
-            
+
     Returns:
         quantile: <float>[tasks_per_batch]
             Scalar estimate of task quantile given K examples.

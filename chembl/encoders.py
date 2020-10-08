@@ -155,7 +155,7 @@ class R2D2Head(nn.Module):
         super(R2D2Head, self).__init__()
 
         # Lambda is in the log-space.
-        self.l2_regularizer = nn.Parameter(torch.tensor(0.0, dtype=torch.float32))
+        self.l2_regularizer = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
     def forward(self, query, support, support_targets):
         """Returns regression scores.
@@ -194,3 +194,42 @@ class R2D2Head(nn.Module):
         y_pred = query.bmm(W).squeeze(-1)
 
         return y_pred
+
+
+class DeepSet(nn.Module):
+    """Set --> scalar."""
+
+    def __init__(self, hparams):
+        super(DeepSet, self).__init__()
+        input_size = 2
+        if hparams.use_adaptive_encoding:
+            input_size += hparams.enc_hidden_size
+
+        self.embedder = nn.Sequential(
+            nn.Linear(input_size, hparams.set_hidden_size),
+            nn.ReLU(),
+            nn.Linear(hparams.set_hidden_size, hparams.set_hidden_size),
+            nn.ReLU())
+
+        self.combiner = nn.Sequential(
+            nn.Linear(hparams.set_hidden_size, hparams.set_hidden_size),
+            nn.ReLU(),
+            nn.Linear(hparams.set_hidden_size, hparams.set_hidden_size),
+            nn.ReLU(),
+            nn.Linear(hparams.set_hidden_size, 1))
+
+    def forward(self, inputs):
+        """Encode set inputs.
+
+        inputs: <float> [batch_size, n_support, dim]
+        """
+        # [batch_size, n_support, set_hidden_size]
+        set_embs = self.embedder(inputs)
+
+        # [batch_size, set_hidden_size]
+        set_embs = set_embs.mean(dim=1)
+
+        # [batch_size]
+        preds = self.combiner(set_embs).view(-1)
+
+        return preds
