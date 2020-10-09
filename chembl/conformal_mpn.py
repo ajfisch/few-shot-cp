@@ -55,10 +55,8 @@ class FewShotSampler(torch.utils.data.Sampler):
         for _ in range(self.tasks_per_batch):
             task_idx = np.random.randint(0, len(self.indices))
             task_indices = self.indices[task_idx]
-            example_indices = np.random.choice(
-                task_indices,
-                size=self.num_support + self.num_query,
-                replace=False)
+            samples = np.random.permutation(len(task_indices))[:self.num_support + self.num_query]
+            example_indices = [task_indices[i] for i in samples]
             batch_indices.extend(example_indices)
         return batch_indices
 
@@ -105,17 +103,17 @@ class ConformalMPN(pl.LightningModule):
         return (query, support, support_targets), query_targets
 
     def forward(self, inputs, sizes=None):
-        if not sizes:
-            sizes = [self.hparams.tasks_per_batch,
-                     self.hparams.num_support,
-                     self.hparams.num_query]
+        sizes = {} if sizes is None else sizes
+        sizes = [sizes.get("tasks_per_batch", self.hparams.tasks_per_batch),
+                 sizes.get("num_support", self.hparams.num_support),
+                 sizes.get("num_query", self.hparams.num_query)]
         inputs, targets = self.encode(inputs, sizes)
 
         # [tasks_per_batch, n_query]
         y_pred = self.head(*inputs)
 
         # MSE.
-        loss = (targets - y_pred).pow(2)
+        loss = (targets - y_pred).pow(2).mean(-1)
 
         return dict(loss=loss, preds=y_pred)
 
@@ -138,7 +136,7 @@ class ConformalMPN(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=3, min_lr=1e-6)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=2, min_lr=1e-6)
         return [optimizer], [scheduler]
 
     @staticmethod
@@ -226,17 +224,17 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/conformal_mpn")
+        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/conformal_mpn/debug")
         parser.add_argument("--overwrite", type=bool, default=True)
 
-        parser.add_argument("--tasks_per_batch", type=int, default=4)
-        parser.add_argument("--num_support", type=int, default=20)
-        parser.add_argument("--num_query", type=int, default=16)
+        parser.add_argument("--tasks_per_batch", type=int, default=8)
+        parser.add_argument("--num_support", type=int, default=10)
+        parser.add_argument("--num_query", type=int, default=32)
         parser.add_argument("--max_train_iters", type=int, default=2000)
         parser.add_argument("--max_val_iters", type=int, default=100)
-        parser.add_argument("--max_epochs", type=int, default=40)
+        parser.add_argument("--max_epochs", type=int, default=15)
 
-        parser.add_argument("--num_data_workers", type=int, default=12)
+        parser.add_argument("--num_data_workers", type=int, default=20)
         parser.add_argument("--train_data", type=str, default="../data/chembl/train_molecules.csv")
         parser.add_argument("--train_features", type=str, default="../data/chembl/features/train_molecules.npy")
         parser.add_argument("--val_data", type=str, default="../data/chembl/val_molecules.csv")
@@ -245,14 +243,14 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--features_generator", type=str, nargs="+", default=None)
         parser.add_argument("--use_mpn_features", type="bool", default=True)
         parser.add_argument("--use_mol_features", type="bool", default=True)
-        parser.add_argument("--mpn_hidden_size", type=int, default=512)
+        parser.add_argument("--mpn_hidden_size", type=int, default=256)
         parser.add_argument("--mol_features_size", type=int, default=200)
-        parser.add_argument("--ffnn_hidden_size", type=int, default=1024)
+        parser.add_argument("--ffnn_hidden_size", type=int, default=256)
         parser.add_argument("--num_ffnn_layers", type=int, default=3)
         parser.add_argument("--dropout", type=float, default=0.1)
-        parser.add_argument("--mpn_depth", type=int, default=3)
+        parser.add_argument("--mpn_depth", type=int, default=2)
         parser.add_argument("--undirected_mpn", type="bool", default=False)
-        parser.add_argument("--enc_hidden_size", type=int, default=64)
+        parser.add_argument("--enc_hidden_size", type=int, default=128)
 
         return parser
 
