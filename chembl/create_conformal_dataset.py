@@ -16,12 +16,16 @@ import quantile_snn
 def predict(s_model, q_model, inputs, args):
     """Predict quantiles and compute baselines for an input batch.
 
+    Note that we only compute the baselines for n_query, where we assume
+    n_query < n_calibration (we only need the large n for our method).
+
     Prediction follows steps:
        1) Compute leave-out-one scores on the support set.
        2) Predict the leave-out-none quantile.
        3) Compute the leave-out-none query scores.
-       4) Compute the exact conformal prediction baseline.
-       5) Compute the jacknife+ conformal prediction baseline.
+       4) Change query to only have n_query values instead of n_calibration.
+       5) Compute the exact conformal prediction baseline.
+       6) Compute the jacknife+ conformal prediction baseline.
 
     Args:
         s_model: ConformalMPN model.
@@ -30,12 +34,13 @@ def predict(s_model, q_model, inputs, args):
 
     Returns:
         pred_quantiles: [batch_size]
-        query_scores: [batch_size, n_query]
-        query_targets: [batch_size, n_query]
+        query_scores: [batch_size, n_calibration]
+        query_targets: [batch_size, n_calibration]
         exact_intervals: [batch_size, n_query, 2]
         jk_intervals: [batch_size, n_query, 2]
     """
     batch_size = args.batch_size
+    n_calibration = args.num_calibration
     n_query = args.num_query
     n_support = s_model.hparams.num_support
     dim = s_model.hparams.enc_hidden_size
@@ -44,7 +49,7 @@ def predict(s_model, q_model, inputs, args):
 
     # Encode molecules.
     (query, support, support_targets), query_targets = s_model.encode(
-        inputs, [batch_size, n_support, n_query])
+        inputs, [batch_size, n_support, n_calibration])
 
     # --------------------------------------------------------------------------
     # Step 1.
@@ -116,11 +121,20 @@ def predict(s_model, q_model, inputs, args):
     # conformalized, we'll compare these scores to make predictions.
     # --------------------------------------------------------------------------
 
-    # [batch_size, n_query]
+    # [batch_size, n_calibration]
     query_scores = s_model.head(query, support, support_targets)
 
     # --------------------------------------------------------------------------
     # Step 4.
+    #
+    # Truncate queries to just those necessary for baselines.
+    # --------------------------------------------------------------------------
+
+    # [batch_size, n_query, dim]
+    query = query[:, :n_query]
+
+    # --------------------------------------------------------------------------
+    # Step 5.
     #
     # Exact conformal prediction baseline using RRCM. We use the *unconditional*
     # molecule embeddings from the nonconformity model as fixed input features
@@ -148,7 +162,7 @@ def predict(s_model, q_model, inputs, args):
             exact_intervals[i, j] = pred
 
     # --------------------------------------------------------------------------
-    # Step 5.
+    # Step 6.
     #
     # Another baseline. This time the jackknife+ method from Barber et. al.
     # https://arxiv.org/abs/1905.02928
@@ -222,6 +236,9 @@ def main(args):
     q_model = quantile_snn.QuantileSNN.load_from_checkpoint(args.q_ckpt).to(device)
     q_model.eval()
 
+    # Check num_calibration > num_query.
+    assert(args.num_calibration > args.num_query)
+
     # Load data
     n_support = s_model.hparams.num_support
     dataset, indices, _ = s_model.load_dataset(
@@ -231,7 +248,7 @@ def main(args):
         indices=indices,
         tasks_per_batch=args.batch_size,
         num_support=n_support,
-        num_query=args.num_query,
+        num_query=args.num_calibration,
         iters=args.num_samples // args.batch_size)
     loader = torch.utils.data.DataLoader(
         dataset=dataset,
@@ -264,7 +281,8 @@ if __name__ == "__main__":
     parser.add_argument("--features_file", type=str, default="../data/chembl/features/val_molecules.npy")
     parser.add_argument("--epsilon", type=float, default=0.10)
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_query", type=int, default=250)
+    parser.add_argument("--num_query", type=int, default=4)
+    parser.add_argument("--num_calibration", type=int, default=250)
     parser.add_argument("--num_samples", type=int, default=50000)
     parser.add_argument("--num_data_workers", type=int, default=20)
     parser.add_argument("--output_file", type=str, default="../ckpts/chembl/k=10/conformal/q=0.90/val.jsonl")
