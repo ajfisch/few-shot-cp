@@ -11,7 +11,6 @@ import pytorch_lightning as pl
 import shutil
 import subprocess
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
@@ -57,9 +56,7 @@ class QuantileSNN(pl.LightningModule):
             self.encoder = encoders.MoleculeEncoder(hparams)
         self.head = encoders.DeepSet(hparams)
 
-    def forward(self, inputs):
-        mol_graph, mol_features, scores, targets = inputs
-
+    def predict(self, scores, mol_graph=None, mol_features=None):
         # [batch_size, n_support, 1]
         input_encs = [scores.unsqueeze(-1)]
 
@@ -78,7 +75,16 @@ class QuantileSNN(pl.LightningModule):
         # [batch_size]
         y_pred = self.head(input_encs)
 
-        # MSE.
+        return y_pred
+
+    def forward(self, inputs):
+        targets = inputs[-1]
+
+        y_pred = self.predict(
+            scores=inputs[2],
+            mol_graph=inputs[0],
+            mol_features=inputs[1])
+
         loss = (targets - y_pred).pow(2)
 
         return dict(loss=loss, preds=y_pred)
@@ -125,7 +131,7 @@ class QuantileSNN(pl.LightningModule):
                 scores = line["s_scores"]
                 target = np.quantile(line["f_scores"] + [np.inf], alpha, interpolation="higher")
                 task = line["task"]
-                dataset.append(MoleculeSet(scores, mols, target, task, alpha))
+                dataset.append(MoleculeSet(scores, mols, target, task))
 
         return dataset
 
