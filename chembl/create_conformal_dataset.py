@@ -33,7 +33,7 @@ def predict(s_model, q_model, inputs, args):
         query_scores: [batch_size, n_query]
         query_targets: [batch_size, n_query]
         exact_intervals: [batch_size, n_query, 2]
-        jk_intervals: [batch_size, n_query]
+        jk_intervals: [batch_size, n_query, 2]
     """
     batch_size = args.batch_size
     n_query = args.num_query
