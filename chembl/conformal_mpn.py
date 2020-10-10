@@ -224,7 +224,7 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/conformal_mpn/debug")
+        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/debug/conformal_mpn")
         parser.add_argument("--overwrite", type=bool, default=True)
 
         parser.add_argument("--tasks_per_batch", type=int, default=8)
@@ -250,7 +250,7 @@ class ConformalMPN(pl.LightningModule):
         parser.add_argument("--dropout", type=float, default=0.1)
         parser.add_argument("--mpn_depth", type=int, default=2)
         parser.add_argument("--undirected_mpn", type="bool", default=False)
-        parser.add_argument("--enc_hidden_size", type=int, default=128)
+        parser.add_argument("--enc_hidden_size", type=int, default=16)
 
         return parser
 

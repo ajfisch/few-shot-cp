@@ -201,7 +201,7 @@ class DeepSet(nn.Module):
 
     def __init__(self, hparams):
         super(DeepSet, self).__init__()
-        input_size = 2
+        input_size = 1
         if hparams.use_adaptive_encoding:
             input_size += hparams.enc_hidden_size
 

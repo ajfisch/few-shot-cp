@@ -16,7 +16,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
     model.eval()
 
     # Load data
-    dataset, indices, tasks = model.load_dataset(
+    dataset, indices, _ = model.load_dataset(
         dataset_file=dataset_file,
         features_file=features_file)
     sampler = conformal_mpn.FewShotSampler(
@@ -35,6 +35,10 @@ def run_fold(dataset_file, features_file, ckpt, args):
     all_outputs = []
     with torch.no_grad():
         for inputs, (smiles, tasks) in tqdm.tqdm(loader, desc="evaluating fold"):
+            batch_size = args.batch_size
+            n_support = model.hparams.num_support
+            dim = model.hparams.enc_hidden_size
+
             inputs = model.transfer_batch_to_device(inputs, model.device)
 
             # Reshape smiles and tasks to [batch_size, n_support + n_query]
@@ -45,59 +49,88 @@ def run_fold(dataset_file, features_file, ckpt, args):
             (query, support, support_targets), query_targets = model.encode(
                 inputs, [args.batch_size, model.hparams.num_support, args.num_query])
 
-            # === Evaluate on Kth support using K-1 support set. ===
-            # Construct K-fold batch.
-            s_batch = [[] for _ in range(4)]
-            for i in range(model.hparams.num_support):
-                support_idx = [j for j in range(model.hparams.num_support) if j != i]
-                support_idx = torch.LongTensor(support_idx).to(model.device)
-                s_batch[0].append(support[:, i:i + 1, :].view(
-                    -1, 1, model.hparams.enc_hidden_size))
-                s_batch[1].append(support.index_select(1, support_idx).view(
-                    -1, model.hparams.num_support - 1, model.hparams.enc_hidden_size))
-                s_batch[2].append(support_targets.index_select(1, support_idx).view(
-                    -1, model.hparams.num_support - 1))
-                s_batch[3].append(support_targets[:, i:i + 1].view(-1, 1))
-            s_batch = [torch.cat(s, dim=0) for s in s_batch]
+            # --------------------------------------------------------------------------
+            # Step 1.
+            #
+            # Compute leave-out-one scores on the support set.
+            # These "scores" will be used as inputs to the quantile predictor.
+            # --------------------------------------------------------------------------
 
+            loo_queries = query.new(batch_size, n_support, 1, dim)
+            loo_support = support.new(batch_size, n_support, n_support - 1, dim)
+            loo_support_targets = support_targets.new(batch_size, n_support, n_support - 1)
+            loo_query_targets = query_targets.new(batch_size, n_support, 1)
+
+            for i in range(n_support):
+                # All indices *except* this one for support.
+                support_idx = [j for j in range(n_support) if j != i]
+                support_idx = torch.LongTensor(support_idx).to(model.device)
+
+                # Held out i-th support example is the "query".
+                loo_queries[:, i] = support[:, i:i + 1, :].view(
+                    batch_size, 1, dim)
+
+                # Remaining k-1 supporth examples are the "support".
+                loo_support[:, i] = support.index_select(1, support_idx).view(
+                    batch_size, n_support - 1, dim)
+
+                # "Support" targets.
+                loo_support_targets[:, i] = support_targets.index_select(1, support_idx).view(
+                    batch_size, n_support - 1)
+
+                # "Query" target.
+                loo_query_targets[:, i] = support_targets[:, i:i + 1].view(
+                    batch_size, 1)
+
+            # Reshape to parallel batch_size * n_support.
             # [batch_size * n_support, 1]
-            s_pred = model.head(*s_batch[:3])
+            loo_pred = model.head(
+                loo_queries.view(batch_size * n_support, 1, dim),
+                loo_support.view(batch_size * n_support, n_support - 1, dim),
+                loo_support_targets.view(batch_size * n_support, n_support - 1))
+
+            # [batch_size, n_support, 1]
+            loo_pred = loo_pred.view(batch_size, n_support, 1)
+            loo_scores = (loo_query_targets - loo_pred).pow(2)
 
             # [batch_size, n_support]
-            s_scores = (s_batch[3] - s_pred).pow(2)
-            s_scores = s_scores.view(-1, model.hparams.num_support).tolist()
+            loo_scores = loo_scores.view(batch_size, n_support).tolist()
 
-            # === Evaluate on all queries using full support set. ===
-            # [batch_size, n_query]
-            f_pred = model.head(query, support, support_targets)
+            # --------------------------------------------------------------------------
+            # Step 2.
+            #
+            # Using the nonconformity model with the *full* support set (all K examples),
+            # predict nonconformity scores on the query points.
+            # --------------------------------------------------------------------------
+            query_pred = model.head(query, support, support_targets)
 
             # [n_query]
-            f_scores = (query_targets - f_pred).pow(2).squeeze(0).tolist()
+            query_scores = (query_targets - query_pred).pow(2).squeeze(0).tolist()
 
             for i in range(args.batch_size):
                 all_outputs.append(
-                    dict(s_scores=s_scores[i],
-                         f_scores=f_scores[i],
+                    dict(s_scores=loo_scores[i],
+                         f_scores=query_scores[i],
                          task=tasks[i][0],
-                         s_smiles=smiles[i][:model.hparams.num_support]))
+                         s_smiles=smiles[i][:n_support]))
 
     return all_outputs
 
 
 def main(args):
-    # all_outputs = []
-    # for ckpt in tqdm.tqdm(args.fold_ckpts, desc="evaluating folds"):
-    #     fold_outputs = run_fold(
-    #         dataset_file=os.path.join(args.data_dir, "val_f%d_molecules.csv" % i),
-    #         features_file=os.path.join(args.features_dir, "val_f%d_molecules.npy" % i),
-    #         ckpt=ckpt,
-    #         args=args)
-    #     all_outputs.extend(fold_outputs)
+    all_outputs = []
+    for i, ckpt in enumerate(tqdm.tqdm(args.fold_ckpts, desc="evaluating folds")):
+        fold_outputs = run_fold(
+            dataset_file=os.path.join(args.data_dir, "val_f%d_molecules.csv" % i),
+            features_file=os.path.join(args.features_dir, "val_f%d_molecules.npy" % i),
+            ckpt=ckpt,
+            args=args)
+        all_outputs.extend(fold_outputs)
 
-    # os.makedirs(args.output_dir, exist_ok=True)
-    # with open(os.path.join(args.output_dir, "train_quantile.jsonl"), "w") as f:
-    #     for output in all_outputs:
-    #         f.write(json.dumps(output, sort_keys=True) + "\n")
+    os.makedirs(args.output_dir, exist_ok=True)
+    with open(os.path.join(args.output_dir, "train_quantile.jsonl"), "w") as f:
+        for output in all_outputs:
+            f.write(json.dumps(output, sort_keys=True) + "\n")
 
     val_outputs = run_fold(
         dataset_file=os.path.join(args.data_dir, "val_molecules.csv"),
