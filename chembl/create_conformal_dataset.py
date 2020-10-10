@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import numpy as np
 import os
 import torch
@@ -87,7 +88,7 @@ def predict(s_model, q_model, inputs, args):
 
     # [batch_size, n_support, 1]
     loo_pred = loo_pred.view(batch_size, n_support, 1)
-    loo_scores = (loo_query_targets - loo_pred).pow(2)
+    loo_scores = (loo_query_targets - loo_pred).abs()
 
     # [batch_size, n_support]
     loo_scores = loo_scores.view(batch_size, n_support)
@@ -130,7 +131,7 @@ def predict(s_model, q_model, inputs, args):
     # --------------------------------------------------------------------------
 
     # [batch_size, n_query, 2]
-    exact_intervals = np.empty((batch_size, n_query, 2))
+    exact_intervals = np.zeros((batch_size, n_query, 2))
 
     # Meta-learned regularization parameter.
     lambda_ = s_model.head.l2_regularizer.exp().item()
@@ -150,15 +151,17 @@ def predict(s_model, q_model, inputs, args):
     # Step 5.
     #
     # Another baseline. This time the jackknife+ method from Barber et. al.
-    # We compute and store p-values for each query.
+    # https://arxiv.org/abs/1905.02928
     #
-    # Note that jackknife+ doesn't give exact guarantees for 1 - epsilon (though
-    # it is often conservative). We also compute the "corrected" intervals.
+    # This gives confidence intervals directly, not quantiles, so we compute it
+    # for the eventual 1 - epsilon desired coverage.
+    #
+    # Note that jackknife+ doesn't give exact guarantees for 1 - epsilon, but
+    # rather 1 - 2 * epsilon. 1 - epsilon generally hold in practice, however.
     # --------------------------------------------------------------------------
 
     # [batch_size, n_support, n_query, dim]
     jk_query = query.unsqueeze(1).repeat(1, n_support, 1, 1)
-    jk_query_targets = query_targets.unsqueeze(1).repeat(1, n_support, 1)
 
     # [batch_size * n_support, n_query]
     jk_pred = s_model.head(
@@ -166,22 +169,37 @@ def predict(s_model, q_model, inputs, args):
         loo_support.view(batch_size * n_support, n_support - 1, dim),
         loo_support_targets.view(batch_size * n_support, n_support - 1))
 
+    # The \hat{u_{-i}}
     # [batch_size, n_support, n_query]
     jk_pred = jk_pred.view(batch_size, n_support, n_query)
-    jk_loo_scores = (jk_query_targets - jk_pred).pow(2)
 
-    # Count number of loo support scores that are more conforming (less than)
-    # the corresponding loo query scores.
-    jk_loo_calibration = loo_scores.unsqueeze(-1).expand(batch_size, n_support, n_query)
+    # Compute lower jackknife quantile.
+    # [batch_size, n_support, n_query]
+    lower = jk_pred - loo_scores.unsqueeze(-1)
+    neg_inf = torch.ones(batch_size, 1, n_query, out=lower.new()) * -np.inf
+    lower = torch.cat([lower, neg_inf], dim=1)
 
     # [batch_size, n_query]
-    jk_pvalues = jk_loo_calibration.le(jk_loo_scores).sum(dim=1) / (n_support + 1)
+    k = math.floor(args.epsilon * (n_support + 1)) + 1
+    lower = torch.kthvalue(lower, k, dim=1).values
+
+    # Compute upper jackknife quantile.
+    upper = jk_pred + loo_scores.unsqueeze(-1)
+    pos_inf = torch.ones(batch_size, 1, n_query, out=upper.new()) * np.inf
+    upper = torch.cat([upper, pos_inf], dim=1)
+
+    # [batch_size, n_query]
+    k = math.ceil((1 - args.epsilon) * (n_support + 1))
+    upper = torch.kthvalue(upper, k, dim=1).values
+
+    # [batch_size, n_query, 2]
+    jk_intervals = torch.cat([lower.unsqueeze(-1), upper.unsqueeze(-1)], dim=-1)
 
     return dict(pred_quantiles=pred_quantiles.tolist(),
                 query_scores=query_scores.tolist(),
                 query_targets=query_targets.tolist(),
                 exact_intervals=exact_intervals.tolist(),
-                jk_pvalues=jk_pvalues.tolist())
+                jk_intervals=jk_intervals.tolist())
 
 
 def main(args):
@@ -206,7 +224,7 @@ def main(args):
 
     # Load data
     n_support = s_model.hparams.num_support
-    dataset, indices, task_dict = s_model.load_dataset(
+    dataset, indices, _ = s_model.load_dataset(
         dataset_file=args.dataset_file,
         features_file=args.features_file)
     sampler = conformal_mpn.FewShotSampler(
@@ -221,9 +239,6 @@ def main(args):
         num_workers=args.num_data_workers,
         collate_fn=conformal_mpn.construct_molecule_batch)
 
-    # Mapping of task index back to string.
-    idx2task = {v: k for k, v in task_dict.items()}
-
     # Evaluate batches and write examples to disk.
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     with open(args.output_file, "w") as f:
@@ -236,21 +251,22 @@ def main(args):
                         query_scores=outputs["query_scores"][i],
                         query_targets=outputs["query_targets"][i],
                         exact_intervals=outputs["exact_intervals"][i],
-                        jk_pvalues=outputs["jk_pvalues"][i],
-                        task=idx2task[tasks[i]])
+                        jk_intervals=outputs["jk_intervals"][i],
+                        task=tasks[i])
                     f.write(json.dumps(example) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default=None)
-    parser.add_argument("--s_ckpt", type=str, default=None)
-    parser.add_argument("--dataset_file", type=str, default=None)
-    parser.add_argument("--features_file", type=str, default=None)
+    parser.add_argument("--q_ckpt", type=str, default="../ckpts/chembl/k=10/quantile_snn/q=0.90/_ckpt_epoch_10.ckpt")
+    parser.add_argument("--s_ckpt", type=str, default="../ckpts/chembl/k=10/conformal_mpn/full/_ckpt_epoch_11.ckpt")
+    parser.add_argument("--dataset_file", type=str, default="../data/chembl/val_molecules.csv")
+    parser.add_argument("--features_file", type=str, default="../data/chembl/features/val_molecules.npy")
+    parser.add_argument("--epsilon", type=float, default=0.10)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_query", type=int, default=250)
     parser.add_argument("--num_samples", type=int, default=50000)
     parser.add_argument("--num_data_workers", type=int, default=20)
-    parser.add_argument("--output_file", type=str, default="../ckpts/chembl/k=10/conformal_mpn")
+    parser.add_argument("--output_file", type=str, default="../ckpts/chembl/k=10/conformal/q=0.90/val.jsonl")
     args = parser.parse_args()
     main(args)
