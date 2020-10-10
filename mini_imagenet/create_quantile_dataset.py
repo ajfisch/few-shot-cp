@@ -42,7 +42,7 @@ parser.add_argument('--evaluation_name', type=str, help='Evaluation name')
 parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
 parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
 parser.add_argument('--n_support', default=5, type=int, help='Number of support samples per class')
-parser.add_argument('--n_query', default=30, type=int, help='Number of query samples')
+parser.add_argument('--n_query', default=100, type=int, help='Number of query samples')
 parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     default=[
                     "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_0/model_best_acc.pth.tar",
@@ -52,7 +52,7 @@ parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_4/model_best_acc.pth.tar",
                              ])
 parser.add_argument("--full_ckpt", type=str,
-                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_20_way/model_best_acc.pth.tar")
+                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way/model_best_acc.pth.tar")
 
 
 def run_fold(dataset_dir, images_dir, ckpt, split, args):
@@ -89,8 +89,8 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
             p = args.n_support * args.n_way
             data_support, data_query = data[:p], data[p:]
 
-            # [n_way, n_support, model.out_channels]
-            support_encodings = model(data_support).reshape(args.n_way, args.n_support, -1)
+            # [n_support, n_way, model.out_channels]
+            support_encodings = model(data_support).view(args.n_support, args.n_way, -1)
 
             # === Evaluate on Kth support using K-1 support set. ===
             # Construct K-fold batch.
@@ -103,12 +103,12 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
 
                 # Query.
                 # [n_way, model.output_channels]
-                query = support_encodings[:, i:i + 1, :].squeeze()
+                query = support_encodings[i:i + 1, :, :].squeeze()
 
                 # Support.
                 # [n_way, model.output_channels]
                 support_proto = support_encodings.index_select(
-                    1, support_idx).mean(dim=1)
+                    0, support_idx).mean(dim=0)
                 s_logits = euclidean_dist(query, support_proto)
                 s_scores = s_logits.diag().tolist()
                 for i, s in enumerate(s_scores):
@@ -119,7 +119,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
                 s_accuracy.update(s_acc, labels.size(0))
 
             # === Evaluate on all queries using full support set. ===
-            # Generate labels (n_way, n_query)
+            # Generate labels [n_way, n_query]
             labels = torch.arange(args.n_way).long().repeat(args.n_query).to(
                 support_encodings.device)
 
@@ -131,7 +131,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
             acc = compute_accuracy(logits, labels)
             accuracy.update(acc, data_query.size(0))
 
-            # Collect per task scores by from all queries.
+            # Collect per task scores from all queries.
             all_f_scores = [
                 logits[torch.arange(data_query.size(0)), labels][torch.arange(
                     i, data_query.size(0), args.n_way)].tolist()
@@ -195,6 +195,7 @@ def main():
     assert args.arch == 'default_convnet'
 
     extract_full(args)
+    extract_k_folds(args)
 
 
 if __name__ == '__main__':
