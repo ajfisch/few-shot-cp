@@ -34,7 +34,7 @@ def predict(s_model, q_model, inputs, args):
 
     Returns:
         pred_quantiles: [batch_size]
-        query_scores: [batch_size, n_calibration]
+        query_preds: [batch_size, n_calibration]
         query_targets: [batch_size, n_calibration]
         exact_intervals: [batch_size, n_query, 2]
         jk_intervals: [batch_size, n_query, 2]
@@ -122,7 +122,7 @@ def predict(s_model, q_model, inputs, args):
     # --------------------------------------------------------------------------
 
     # [batch_size, n_calibration]
-    query_scores = s_model.head(query, support, support_targets)
+    query_preds = s_model.head(query, support, support_targets)
 
     # --------------------------------------------------------------------------
     # Step 4.
@@ -210,7 +210,7 @@ def predict(s_model, q_model, inputs, args):
     jk_intervals = torch.cat([lower.unsqueeze(-1), upper.unsqueeze(-1)], dim=-1)
 
     return dict(pred_quantiles=pred_quantiles.tolist(),
-                query_scores=query_scores.tolist(),
+                query_preds=query_preds.tolist(),
                 query_targets=query_targets.tolist(),
                 exact_intervals=exact_intervals.tolist(),
                 jk_intervals=jk_intervals.tolist())
@@ -265,7 +265,7 @@ def main(args):
                 for i in range(args.batch_size):
                     example = dict(
                         pred_quantile=outputs["pred_quantiles"][i],
-                        query_scores=outputs["query_scores"][i],
+                        query_preds=outputs["query_preds"][i],
                         query_targets=outputs["query_targets"][i],
                         exact_intervals=outputs["exact_intervals"][i],
                         jk_intervals=outputs["jk_intervals"][i],
@@ -275,7 +275,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="../ckpts/chembl/k=10/quantile_snn/q=0.90/_ckpt_epoch_10.ckpt")
+    parser.add_argument("--q_ckpt", type=str, default="../ckpts/chembl/k=10/quantile_snn/q=0.95/_ckpt_epoch_11.ckpt")
     parser.add_argument("--s_ckpt", type=str, default="../ckpts/chembl/k=10/conformal_mpn/full/_ckpt_epoch_11.ckpt")
     parser.add_argument("--dataset_file", type=str, default="../data/chembl/val_molecules.csv")
     parser.add_argument("--features_file", type=str, default="../data/chembl/features/val_molecules.npy")

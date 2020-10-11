@@ -67,7 +67,7 @@ def conf_pred(X, Y_, lambda_, alpha=0.1):
     for i in range(size - 1):
 
         n_pvalue_i = 0.
-        intvl_i = intervals.closed(hat_y[i], hat_y[i + 1])
+        intvl_i = intervals.open(hat_y[i], hat_y[i + 1])
         for j in range(n_samples):
             n_pvalue_i += intvl_i in S[j]
 
