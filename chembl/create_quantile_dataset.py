@@ -91,7 +91,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
 
             # [batch_size, n_support, 1]
             loo_pred = loo_pred.view(batch_size, n_support, 1)
-            loo_scores = (loo_query_targets - loo_pred).pow(2)
+            loo_scores = (loo_query_targets - loo_pred).abs()
 
             # [batch_size, n_support]
             loo_scores = loo_scores.view(batch_size, n_support).tolist()
@@ -105,7 +105,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
             query_pred = model.head(query, support, support_targets)
 
             # [n_query]
-            query_scores = (query_targets - query_pred).pow(2).squeeze(0).tolist()
+            query_scores = (query_targets - query_pred).abs().squeeze(0).tolist()
 
             for i in range(args.batch_size):
                 all_outputs.append(
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_query", type=int, default=250)
     parser.add_argument("--num_samples_per_fold", type=int, default=20000)
-    parser.add_argument("--num_data_workers", type=int, default=20)
+    parser.add_argument("--num_data_workers", type=int, default=40)
     parser.add_argument("--output_dir", type=str, default="../ckpts/chembl/k=10/conformal_mpn")
     args = parser.parse_args()
     main(args)

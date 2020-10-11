@@ -170,7 +170,7 @@ class QuantileSNN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/debug/quantile_snn_noadapt")
+        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/debug/quantile_snn")
         parser.add_argument("--overwrite", type="bool", default=True)
 
         parser.add_argument("--batch_size", type=int, default=64)
