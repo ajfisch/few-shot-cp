@@ -132,8 +132,10 @@ class QuantileSNN(pl.LightningModule):
             for line in tqdm.tqdm(f, total=num_lines):
                 line = json.loads(line)
 
-                scores = line["s_scores"]
-                target = np.quantile(line["f_scores"] + [np.inf], alpha, interpolation="higher")
+                #scores = line["s_scores"]
+                #target = np.quantile(line["f_scores"] + [np.inf], alpha, interpolation="higher")
+                scores = [1 -x for x in  line["s_probs"]]
+                target = np.quantile([1-x for x in line["f_probs"]] + [np.inf], alpha, interpolation="higher")
                 task = line["task"]
                 dataset.append(ExampleSet(scores, target, task))
 
@@ -171,15 +173,15 @@ class QuantileSNN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="results/5_way/quantile_snn")
+        parser.add_argument("--checkpoint_dir", type=str, default="results/10_way/quantile_snn")
         parser.add_argument("--overwrite", type="bool", default=True)
 
         parser.add_argument("--batch_size", type=int, default=64)
         parser.add_argument("--max_epochs", type=int, default=15)
 
         parser.add_argument("--num_data_workers", type=int, default=20)
-        parser.add_argument("--train_data", type=str, default="results/5_way/train_quantile.jsonl")
-        parser.add_argument("--val_data", type=str, default="results/5_way/val_quantile.jsonl")
+        parser.add_argument("--train_data", type=str, default="results/10_way/train_quantile.jsonl")
+        parser.add_argument("--val_data", type=str, default="results/10_way/val_quantile.jsonl")
 
         parser.add_argument("--alpha", type=float, default=0.8)
         parser.add_argument("--set_hidden_size", type=int, default=64)

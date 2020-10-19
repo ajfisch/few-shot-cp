@@ -96,6 +96,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
             # Construct K-fold batch.
             labels = torch.arange(args.n_way).long().to(support_encodings.device)
             all_s_scores = [[] for _ in  range(args.n_way)]
+            all_s_probs = [[] for _ in  range(args.n_way)]
             for i in range(args.n_support):
                 support_idx = [j for j in range(args.n_support) if j != i]
                 support_idx = torch.LongTensor(support_idx).to(
@@ -111,8 +112,10 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
                     0, support_idx).mean(dim=0)
                 s_logits = euclidean_dist(query, support_proto)
                 s_scores = s_logits.diag().tolist()
+                s_probs = torch.softmax(s_logits, dim=1).diag().tolist()
                 for i, s in enumerate(s_scores):
                     all_s_scores[i].append(s)
+                    all_s_probs[i].append(s_probs[i])
 
                 # Labels.
                 s_acc = compute_accuracy(s_logits, labels)
@@ -128,6 +131,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
 
             # Compute accuracy.
             logits = euclidean_dist(model(data_query), class_prototypes)
+            probs = torch.softmax(logits, dim=1)
             acc = compute_accuracy(logits, labels)
             accuracy.update(acc, data_query.size(0))
 
@@ -137,10 +141,18 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
                     i, data_query.size(0), args.n_way)].tolist()
                 for i in range(args.n_way)
             ]
+            all_f_probs = [
+                probs[torch.arange(data_query.size(0)), labels][torch.arange(
+                    i, data_query.size(0), args.n_way)].tolist()
+                for i in range(args.n_way)
+            ]
+
             for i in range(args.n_way):
                 all_outputs.append(
                     dict(s_scores=all_s_scores[i],
                          f_scores=all_f_scores[i],
+                         s_probs=all_s_probs[i],
+                         f_probs=all_f_probs[i],
                          task=tasks[i],
                          ))
                          #TODO: add representation
