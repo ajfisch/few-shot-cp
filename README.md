@@ -1,9 +1,14 @@
-# Meta-learned Few-Shot Conformal Prediction
+# Meta-Learned Few-Shot Conformal Prediction
 
+## Modeling
+
+For everything, we simply use prototypical network variants (for both classification and regression).
 
 ## Task Instructions
 
 1. Train a nonconformity measure using a standard meta-learned few-shot learning algorithm.
+
+An example API is:
 
 ```python
 def forward(self, query, support, support_targets):
@@ -26,6 +31,7 @@ def forward(self, query, support, support_targets):
     ...
 ```
 
+The important thing is returning the nonconformity scores.
 
 2. Train quantiles. Train using nonconformity scores measure on K - 1 support labels. Potentially add encodings of inputs as well (like context augmentation in adaptive risk minimization). Train for 0.95/0.9/0.8/0.7/0.6 quantiles.
 
