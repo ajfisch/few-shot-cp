@@ -18,7 +18,7 @@ from prototypical_networks.samplers.episodic_batch_sampler import EpisodicBatchS
 from prototypical_networks.dataloaders.mini_imagenet_loader import MiniImageNet, ROOT_PATH
 from prototypical_networks.models.convnet_mini import ConvNet
 from prototypical_networks.models.identity import Identity
-from prototypical_networks.utils import AverageMeter, compute_accuracy, euclidean_dist, mkdir
+from prototypical_networks.utils import AverageMeter, euclidean_dist, mkdir
 from torch.utils.data import DataLoader
 
 
@@ -37,7 +37,6 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='default_convnet',
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('--evaluation_name', type=str, help='Evaluation name')
 parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
 parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
@@ -45,15 +44,19 @@ parser.add_argument('--n_support', default=5, type=int, help='Number of support 
 parser.add_argument('--n_query', default=100, type=int, help='Number of query samples')
 parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     default=[
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_0/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_1/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_2/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_3/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way_split_4/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_0/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_1/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_2/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_3/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_4/model_best_acc.pth.tar",
                              ])
 parser.add_argument("--full_ckpt", type=str,
-                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way/model_best_acc.pth.tar")
+                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way/model_best_acc.pth.tar")
 
+def compute_accuracy(logits, label):
+    # Use argmin (unlike propotypical networks code)
+    pred = torch.argmin(logits, dim=1)
+    return (pred == label).type(torch.cuda.FloatTensor).mean().item()
 
 def run_fold(dataset_dir, images_dir, ckpt, split, args):
     # Load model
@@ -110,7 +113,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
                 # [n_way, model.output_channels]
                 support_proto = support_encodings.index_select(
                     0, support_idx).mean(dim=0)
-                s_logits = euclidean_dist(query, support_proto)
+                s_logits = -1 * euclidean_dist(query, support_proto)
                 s_scores = s_logits.diag().tolist()
                 s_probs = torch.softmax(s_logits, dim=1).diag().tolist()
                 for i, s in enumerate(s_scores):
@@ -130,7 +133,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
                 args.n_support, args.n_way, -1).mean(dim=0)
 
             # Compute accuracy.
-            logits = euclidean_dist(model(data_query), class_prototypes)
+            logits = -1 * euclidean_dist(model(data_query), class_prototypes)
             probs = torch.softmax(logits, dim=1)
             acc = compute_accuracy(logits, labels)
             accuracy.update(acc, data_query.size(0))

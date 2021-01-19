@@ -132,10 +132,10 @@ class QuantileSNN(pl.LightningModule):
             for line in tqdm.tqdm(f, total=num_lines):
                 line = json.loads(line)
 
-                #scores = line["s_scores"]
-                #target = np.quantile(line["f_scores"] + [np.inf], alpha, interpolation="higher")
-                scores = [1 -x for x in  line["s_probs"]]
-                target = np.quantile([1-x for x in line["f_probs"]] + [np.inf], alpha, interpolation="higher")
+                scores = line["s_scores"]
+                target = np.quantile(line["f_scores"], alpha, interpolation="higher")
+                #scores = [1 -x for x in  line["s_probs"]]
+                #target = np.quantile([1-x for x in line["f_probs"]], alpha, interpolation="higher")
                 task = line["task"]
                 dataset.append(ExampleSet(scores, target, task))
 
