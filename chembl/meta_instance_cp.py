@@ -53,6 +53,8 @@ def create_trials(tasks, num_trials):
 def main(args):
     np.random.seed(42)
 
+    args.epsilons = [1 - t for t in args.tolerances]
+
     print("Loading data...")
     tasks = load_data(args.dataset_file)
 
@@ -101,7 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_trials", type=int, default=2000)
     parser.add_argument("--overwrite_trials", action="store_true")
     parser.add_argument("--overwrite_results", action="store_true")
-    parser.add_argument("--epsilons", nargs="+", type=float, default=[.05])
+    parser.add_argument("--tolerances", nargs="+", type=float, default=[.95])
     parser.add_argument("--deltas", nargs="+", type=float, default=[0])
     parser.add_argument("--threads", type=int, default=30)
     args = parser.parse_args()
