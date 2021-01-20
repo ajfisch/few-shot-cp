@@ -1,8 +1,11 @@
 #! /bin/bash
+K=16
 
 for quantile in 0.95 0.90 0.80 0.70 0.60; do
-    echo python quantile_snn.py \
-         --checkpoint_dir "../ckpts/chembl/k=10/quantile_snn/q=${quantile}" \
+    echo python modeling/quantile.py \
+         --checkpoint_dir "../ckpts/chembl/k=$K/quantile/q=${quantile}" \
+         --train_data "../ckpts/chembl/k=$K/nonconformity/train_quantile.jsonl" \
+         --val_data "../ckpts/chembl/k=$K/nonconformity/val_quantile.jsonl" \
          --num_data_workers 5 \
          --alpha $quantile \
          --use_adaptive_encoding false

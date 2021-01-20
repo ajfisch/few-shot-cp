@@ -38,26 +38,21 @@ def load_trials(dataset_file, num_trials):
                 task2idx[example["task"]] = len(task2idx)
             idx = task2idx[example["task"]]
             idx2examples[idx].append(example)
+    idx2examples = [idx2examples[i] for i in range(len(idx2examples))]
 
     num_tasks = len(task2idx)
     print("Number of tasks: %d" % num_tasks)
 
-    episodes_per_task = np.mean([len(v) for v in idx2examples.values()])
+    episodes_per_task = np.mean([len(v) for v in idx2examples])
     print("Avg number of episodes per task: %2.2f" % episodes_per_task)
 
-    # For every trial, we sample a random order of tasks (i.e. calibration vs test),
-    # and for every task in this ordering we sample a random episode.
+    # For every trial, we sample a random order of tasks (i.e. calibration vs test).
     trials = []
     for _ in range(num_trials):
-        trial = []
         order = np.random.permutation(num_tasks)
-        for i in order:
-            task_examples = idx2examples[i]
-            episode = np.random.randint(len(task_examples))
-            trial.append(task_examples[episode])
-        trials.append(trial)
+        trials.append(order)
 
-    return trials
+    return trials, idx2examples
 
 
 def conformalize_quantile(predictions, calibration, alpha, beta):
@@ -68,10 +63,12 @@ def conformalize_quantile(predictions, calibration, alpha, beta):
     beta: scalar
     """
     errors = []
-    import pdb; pdb.set_trace()
-    for t, prediction in enumerate(predictions):
-        true_quantile = np.quantile(calibration[t] + [np.inf], alpha, interpolation="higher")
-        errors.append(true_quantile - prediction)
+    for t, task_predictions in enumerate(predictions):
+        sample_errors = []
+        for s, prediction in enumerate(task_predictions):
+            true_quantile = np.quantile(calibration[t][s] + [np.inf], alpha, interpolation="higher")
+            sample_errors.append(true_quantile - prediction)
+        errors.append(np.mean(sample_errors))
     delta = np.quantile(errors + [np.inf], beta, interpolation="higher")
     return delta
 
@@ -92,38 +89,56 @@ def optimize_conformal_quantile(predictions, calibration, epsilon):
 
 def evaluate_trial(tasks, num_samples, epsilon):
     """Evaluate a conformal trial."""
-    assert(len(tasks[0]["exact_intervals"]) >= num_samples)
-    assert(len(tasks[0]["jk_intervals"]) >= num_samples)
+    global idx2examples
+
+    task_examples = []
+    for i in tasks:
+        examples = idx2examples[i]
+        samples = np.random.permutation(len(examples))[:100]
+        task_examples.append([examples[j] for j in samples])
+    tasks = task_examples
+
+    assert(len(tasks[0][0]["exact_intervals"]) >= num_samples)
+    assert(len(tasks[0][0]["jk_intervals"]) >= num_samples)
 
     # Step 1: Conformalize the quantile on calibration tasks.
-    predictions = [t["pred_quantile"] for t in tasks[:-1]]
-    calibration = [[abs(s - t) for s, t in zip(t["query_preds"], t["query_targets"])] for t in tasks[:-1]]
+    predictions = [[ex["pred_quantile"] for ex in t] for t in tasks[:-1]]
+    calibration = [[[abs(x - y) for x, y in zip(ex["query_preds"], ex["query_targets"])] for ex in t]
+                   for t in tasks[:-1]]
     delta = optimize_conformal_quantile(predictions, calibration, epsilon)
-    delta = 0
 
     # Step 2: Compute intervals on the test task.
-    quantile = tasks[-1]["pred_quantile"] + delta
-    test_preds = tasks[-1]["query_preds"][:num_samples]
-    test_targets = tasks[-1]["query_targets"][:num_samples]
-    meta_intervals = [I.closed(p - quantile, p + quantile) for p in test_preds]
+    eff = {"meta": [], "exact": [], "jackknife": []}
+    acc = {"meta": [], "exact": [], "jackknife": []}
 
-    # Step 3: Compute metrics (along with baselines).
-    exact_intervals = [I.closed(*interval) for interval in tasks[-1]["exact_intervals"][:num_samples]]
-    jk_intervals = [I.closed(*interval) for interval in tasks[-1]["jk_intervals"][:num_samples]]
+    for example in tasks[-1]:
+        quantile = example["pred_quantile"] + delta
+        test_preds = example["query_preds"][:num_samples]
+        test_targets = example["query_targets"][:num_samples]
+        meta_intervals = [I.closed(p - quantile, p + quantile) for p in test_preds]
 
-    meta_length = 2 * quantile
-    meta_acc = np.mean([t in interval for interval, t in zip(meta_intervals, test_targets)])
-    meta_result = Result(meta_length, meta_acc)
+        exact_intervals = [I.closed(*interval) for interval in example["exact_intervals"][:num_samples]]
+        jk_intervals = [I.closed(*interval) for interval in example["jk_intervals"][:num_samples]]
 
-    exact_length = np.mean([interval.upper - interval.lower for interval in exact_intervals])
-    exact_acc = np.mean([t in interval for interval, t in zip(exact_intervals, test_targets)])
-    exact_result = Result(exact_length, exact_acc)
+        eff["meta"].append(2 * quantile)
+        acc["meta"].append(np.mean([t in interval for interval, t in zip(meta_intervals, test_targets)]))
 
-    jk_length = np.mean([interval.upper - interval.lower for interval in jk_intervals])
-    jk_acc = np.mean([t in interval for interval, t in zip(jk_intervals, test_targets)])
-    jk_result = Result(jk_length, jk_acc)
+        eff["exact"].append(np.mean([interval.upper - interval.lower for interval in exact_intervals]))
+        acc["exact"].append(np.mean([t in interval for interval, t in zip(exact_intervals, test_targets)]))
 
-    return meta_result, exact_result, jk_result
+        eff["jackknife"].append(np.mean([interval.upper - interval.lower for interval in jk_intervals]))
+        acc["jackknife"].append(np.mean([t in interval for interval, t in zip(jk_intervals, test_targets)]))
+
+    meta_result = Result(np.mean(eff["meta"]), np.mean(acc["meta"]))
+    exact_result = Result(np.mean(eff["exact"]), np.mean(acc["exact"]))
+    jackknife_result = Result(np.mean(eff["jackknife"]), np.mean(acc["jackknife"]))
+
+    return meta_result, exact_result, jackknife_result
+
+
+def worker_init(_idx2examples):
+    global idx2examples
+    idx2examples = _idx2examples
 
 
 def main(args):
@@ -131,7 +146,7 @@ def main(args):
 
     # Load data.
     print("Loading data...")
-    trials = load_trials(args.dataset_file, args.num_trials)
+    trials, idx2examples = load_trials(args.dataset_file, args.num_trials)
 
     # Initialize workers.
     worker_fn = functools.partial(
@@ -139,10 +154,17 @@ def main(args):
         num_samples=args.num_trial_samples,
         epsilon=args.epsilon)
     if args.threads > 0:
-        workers = multiprocessing.Pool(args.threads)
+        workers = multiprocessing.Pool(args.threads, initializer=worker_init, initargs=(idx2examples,))
         map_fn = workers.imap_unordered
     else:
         map_fn = map
+        worker_init(idx2examples)
+
+    # --------------------------------------------------------------------------
+    # Step 1.
+    #
+    # Conformalize the quantile predictor. This is marginal over task examples.
+    # --------------------------------------------------------------------------
 
     # Evaluate!
     meta_results = []
@@ -179,11 +201,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_file", type=str, default="../ckpts/chembl/k=10/conformal/q=0.81/val.jsonl")
+    parser.add_argument("--dataset_file", type=str, default="../ckpts/chembl/k=10/conformal/q=0.73/val.jsonl")
     parser.add_argument("--results_file", type=str, default=None)
     parser.add_argument("--num_trial_samples", type=int, default=4)
-    parser.add_argument("--num_trials", type=int, default=10000)
-    parser.add_argument("--epsilon", type=float, default=0.19)
-    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--num_trials", type=int, default=1000)
+    parser.add_argument("--epsilon", type=float, default=0.27)
+    parser.add_argument("--threads", type=int, default=40)
     args = parser.parse_args()
     main(args)

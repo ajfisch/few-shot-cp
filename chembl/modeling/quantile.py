@@ -3,7 +3,6 @@
 import argparse
 import chemprop
 import collections
-import encoders
 import json
 import numpy as np
 import os
@@ -14,6 +13,8 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
+
+from modeling import encoders
 
 MoleculeSet = collections.namedtuple(
     "MoleculeSet", ["scores", "mols", "target", "task"])
@@ -44,11 +45,11 @@ def construct_molecule_batch(batch):
     return inputs, tasks
 
 
-class QuantileSNN(pl.LightningModule):
+class QuantileNN(pl.LightningModule):
     """Few-shot DeepSet to compute quantiles."""
 
     def __init__(self, hparams):
-        super(QuantileSNN, self).__init__()
+        super(QuantileNN, self).__init__()
         if isinstance(hparams, dict):
             hparams = argparse.Namespace(**hparams)
         self.hparams = hparams
@@ -129,7 +130,7 @@ class QuantileSNN(pl.LightningModule):
                             features=idx_to_features[smiles_to_idx[smiles]].copy() if features_file else None,
                             features_generator=features_generator))
                 scores = line["s_scores"]
-                target = np.quantile(line["f_scores"] + [np.inf], alpha, interpolation="higher")
+                target = np.quantile(line["f_scores"], alpha)
                 task = line["task"]
                 dataset.append(MoleculeSet(scores, mols, target, task))
 
@@ -178,9 +179,9 @@ class QuantileSNN(pl.LightningModule):
         parser.add_argument("--max_epochs", type=int, default=15)
 
         parser.add_argument("--num_data_workers", type=int, default=20)
-        parser.add_argument("--train_data", type=str, default="../ckpts/chembl/k=10/conformal_mpn/train_quantile.jsonl")
+        parser.add_argument("--train_data", type=str, default="../ckpts/chembl/k=10/nonconformity/train_quantile.jsonl")
         parser.add_argument("--train_features", type=str, default="../data/chembl/features/train_molecules.npy")
-        parser.add_argument("--val_data", type=str, default="../ckpts/chembl/k=10/conformal_mpn/val_quantile.jsonl")
+        parser.add_argument("--val_data", type=str, default="../ckpts/chembl/k=10/nonconformity/val_quantile.jsonl")
         parser.add_argument("--val_features", type=str, default="../data/chembl/features/val_molecules.npy")
 
         parser.add_argument("--alpha", type=float, default=0.9)
@@ -203,7 +204,7 @@ class QuantileSNN(pl.LightningModule):
 
 def main(args):
     pl.seed_everything(args.seed)
-    model = QuantileSNN(hparams=args)
+    model = QuantileNN(hparams=args)
     print(model)
     if os.path.exists(args.checkpoint_dir) and os.listdir(args.checkpoint_dir):
         if not args.overwrite:
@@ -229,6 +230,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser = QuantileSNN.add_argparse_args(parser)
+    parser = QuantileNN.add_argparse_args(parser)
     args = parser.parse_args()
     main(args)

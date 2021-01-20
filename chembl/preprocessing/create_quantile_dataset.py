@@ -1,25 +1,26 @@
 """Create quantile prediction training data."""
 
 import argparse
-import conformal_mpn
 import json
 import numpy as np
 import os
 import torch
 import tqdm
 
+from modeling import nonconformity
+
 
 def run_fold(dataset_file, features_file, ckpt, args):
     # Load model
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model = conformal_mpn.ConformalMPN.load_from_checkpoint(ckpt).to(device)
+    model = nonconformity.NonconformityNN.load_from_checkpoint(ckpt).to(device)
     model.eval()
 
     # Load data
     dataset, indices, _ = model.load_dataset(
         dataset_file=dataset_file,
         features_file=features_file)
-    sampler = conformal_mpn.FewShotSampler(
+    sampler = nonconformity.FewShotSampler(
         indices=indices,
         tasks_per_batch=args.batch_size,
         num_support=model.hparams.num_support,
@@ -29,7 +30,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
         dataset=dataset,
         batch_sampler=sampler,
         num_workers=args.num_data_workers,
-        collate_fn=conformal_mpn.construct_molecule_batch)
+        collate_fn=nonconformity.construct_molecule_batch)
 
     # Evaluate
     all_outputs = []
@@ -146,19 +147,19 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fold_ckpts", type=str, nargs="+",
-                        default=["../ckpts/chembl/k=10/conformal_mpn/0/_ckpt_epoch_12.ckpt",
-                                 "../ckpts/chembl/k=10/conformal_mpn/1/_ckpt_epoch_10.ckpt",
-                                 "../ckpts/chembl/k=10/conformal_mpn/2/_ckpt_epoch_13.ckpt",
-                                 "../ckpts/chembl/k=10/conformal_mpn/3/_ckpt_epoch_1.ckpt",
-                                 "../ckpts/chembl/k=10/conformal_mpn/4/_ckpt_epoch_1.ckpt"])
+                        default=["../ckpts/chembl/k=16/nonconformity/0/_ckpt_epoch_12.ckpt",
+                                 "../ckpts/chembl/k=16/nonconformity/1/_ckpt_epoch_10.ckpt",
+                                 "../ckpts/chembl/k=16/nonconformity/2/_ckpt_epoch_13.ckpt",
+                                 "../ckpts/chembl/k=16/nonconformity/3/_ckpt_epoch_11.ckpt",
+                                 "../ckpts/chembl/k=16/nonconformity/4/_ckpt_epoch_1.ckpt"])
     parser.add_argument("--full_ckpt", type=str,
-                        default="../ckpts/chembl/k=10/conformal_mpn/full/_ckpt_epoch_11.ckpt")
+                        default="../ckpts/chembl/k=16/nonconformity/full/_ckpt_epoch_11.ckpt")
     parser.add_argument("--data_dir", type=str, default="../data/chembl")
     parser.add_argument("--features_dir", type=str, default="../data/chembl/features")
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_query", type=int, default=250)
     parser.add_argument("--num_samples_per_fold", type=int, default=20000)
     parser.add_argument("--num_data_workers", type=int, default=40)
-    parser.add_argument("--output_dir", type=str, default="../ckpts/chembl/k=10/conformal_mpn")
+    parser.add_argument("--output_dir", type=str, default="../ckpts/chembl/k=16/nonconformity")
     args = parser.parse_args()
     main(args)

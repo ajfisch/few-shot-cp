@@ -2,15 +2,14 @@
 
 import argparse
 import json
-import math
 import numpy as np
 import os
 import torch
 import tqdm
+import rrcm
 
-import conformal_mpn
-import exact_cp
-import quantile_snn
+from modeling import nonconformity
+from modeling import quantile
 
 
 def predict(s_model, q_model, inputs, args):
@@ -28,8 +27,8 @@ def predict(s_model, q_model, inputs, args):
        6) Compute the jacknife+ conformal prediction baseline.
 
     Args:
-        s_model: ConformalMPN model.
-        q_model: QuantileSNN model.
+        s_model: NonconformityNN model.
+        q_model: QuantileNN model.
         inputs: Input batch of support and query examples.
 
     Returns:
@@ -124,6 +123,9 @@ def predict(s_model, q_model, inputs, args):
     # [batch_size, n_calibration]
     query_preds = s_model.head(query, support, support_targets)
 
+    # [batch_size, n_calibration]
+    query_scores = (query_preds - query_targets).abs()
+
     # --------------------------------------------------------------------------
     # Step 4.
     #
@@ -154,66 +156,18 @@ def predict(s_model, q_model, inputs, args):
         for j in range(n_query):
             X = torch.cat([support[i], query[i, j].unsqueeze(0)], dim=0)
             Y_ = support_targets[i]
-            pred = exact_cp.conf_pred(
+            pred = rrcm.conf_pred(
                 X=X.cpu().numpy(),
                 Y_=Y_.cpu().numpy(),
                 lambda_=lambda_,
                 alpha=args.epsilon)
             exact_intervals[i, j] = pred
 
-    # --------------------------------------------------------------------------
-    # Step 6.
-    #
-    # Another baseline. This time the jackknife+ method from Barber et. al.
-    # https://arxiv.org/abs/1905.02928
-    #
-    # This gives confidence intervals directly, not quantiles, so we compute it
-    # for the eventual 1 - epsilon desired coverage.
-    #
-    # Note that jackknife+ doesn't give exact guarantees for 1 - epsilon, but
-    # rather 1 - 2 * epsilon. 1 - epsilon generally hold in practice, however.
-    # --------------------------------------------------------------------------
-
-    # [batch_size, n_support, n_query, dim]
-    jk_query = query.unsqueeze(1).repeat(1, n_support, 1, 1)
-
-    # [batch_size * n_support, n_query]
-    jk_pred = s_model.head(
-        jk_query.view(batch_size * n_support, n_query, dim),
-        loo_support.view(batch_size * n_support, n_support - 1, dim),
-        loo_support_targets.view(batch_size * n_support, n_support - 1))
-
-    # The \hat{u_{-i}}
-    # [batch_size, n_support, n_query]
-    jk_pred = jk_pred.view(batch_size, n_support, n_query)
-
-    # Compute lower jackknife quantile.
-    # [batch_size, n_support, n_query]
-    lower = jk_pred - loo_scores.unsqueeze(-1)
-    neg_inf = torch.ones(batch_size, 1, n_query, out=lower.new()) * -np.inf
-    lower = torch.cat([lower, neg_inf], dim=1)
-
-    # [batch_size, n_query]
-    k = math.floor(args.epsilon * (n_support + 1)) + 1
-    lower = torch.kthvalue(lower, k, dim=1).values
-
-    # Compute upper jackknife quantile.
-    upper = jk_pred + loo_scores.unsqueeze(-1)
-    pos_inf = torch.ones(batch_size, 1, n_query, out=upper.new()) * np.inf
-    upper = torch.cat([upper, pos_inf], dim=1)
-
-    # [batch_size, n_query]
-    k = math.ceil((1 - args.epsilon) * (n_support + 1))
-    upper = torch.kthvalue(upper, k, dim=1).values
-
-    # [batch_size, n_query, 2]
-    jk_intervals = torch.cat([lower.unsqueeze(-1), upper.unsqueeze(-1)], dim=-1)
-
     return dict(pred_quantiles=pred_quantiles.tolist(),
                 query_preds=query_preds.tolist(),
                 query_targets=query_targets.tolist(),
-                exact_intervals=exact_intervals.tolist(),
-                jk_intervals=jk_intervals.tolist())
+                query_scores=query_scores.tolist(),
+                exact_intervals=exact_intervals.tolist())
 
 
 def main(args):
@@ -229,11 +183,13 @@ def main(args):
     # from in the conformal prediction stage.
     # --------------------------------------------------------------------------
 
+    args.epsilon = 1 - args.tolerance
+
     # Load models.
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    s_model = conformal_mpn.ConformalMPN.load_from_checkpoint(args.s_ckpt).to(device)
+    s_model = nonconformity.NonconformityNN.load_from_checkpoint(args.s_ckpt).to(device)
     s_model.eval()
-    q_model = quantile_snn.QuantileSNN.load_from_checkpoint(args.q_ckpt).to(device)
+    q_model = quantile.QuantileNN.load_from_checkpoint(args.q_ckpt).to(device)
     q_model.eval()
 
     # Check num_calibration > num_query.
@@ -244,7 +200,7 @@ def main(args):
     dataset, indices, _ = s_model.load_dataset(
         dataset_file=args.dataset_file,
         features_file=args.features_file)
-    sampler = conformal_mpn.FewShotSampler(
+    sampler = nonconformity.FewShotSampler(
         indices=indices,
         tasks_per_batch=args.batch_size,
         num_support=n_support,
@@ -254,7 +210,7 @@ def main(args):
         dataset=dataset,
         batch_sampler=sampler,
         num_workers=args.num_data_workers,
-        collate_fn=conformal_mpn.construct_molecule_batch)
+        collate_fn=nonconformity.construct_molecule_batch)
 
     # Evaluate batches and write examples to disk.
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
@@ -266,20 +222,20 @@ def main(args):
                     example = dict(
                         pred_quantile=outputs["pred_quantiles"][i],
                         query_preds=outputs["query_preds"][i],
+                        query_scores=outputs["query_scores"][i],
                         query_targets=outputs["query_targets"][i],
                         exact_intervals=outputs["exact_intervals"][i],
-                        jk_intervals=outputs["jk_intervals"][i],
                         task=tasks[i])
                     f.write(json.dumps(example) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="../ckpts/chembl/k=10/quantile_snn/q=0.95/_ckpt_epoch_11.ckpt")
-    parser.add_argument("--s_ckpt", type=str, default="../ckpts/chembl/k=10/conformal_mpn/full/_ckpt_epoch_11.ckpt")
+    parser.add_argument("--q_ckpt", type=str, default=None)
+    parser.add_argument("--s_ckpt", type=str, default="../ckpts/chembl/k=10/nonconformity/full/_ckpt_epoch_11.ckpt")
     parser.add_argument("--dataset_file", type=str, default="../data/chembl/val_molecules.csv")
     parser.add_argument("--features_file", type=str, default="../data/chembl/features/val_molecules.npy")
-    parser.add_argument("--epsilon", type=float, default=0.10)
+    parser.add_argument("--tolerance", type=float, default=0.90)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_query", type=int, default=4)
     parser.add_argument("--num_calibration", type=int, default=250)

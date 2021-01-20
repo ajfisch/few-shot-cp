@@ -4,7 +4,6 @@ import argparse
 import chemprop
 import collections
 import csv
-import encoders
 import numpy as np
 import os
 import pytorch_lightning as pl
@@ -13,6 +12,8 @@ import subprocess
 import torch
 import torch.optim as optim
 import tqdm
+
+from modeling import encoders
 
 
 def construct_molecule_batch(batch):
@@ -70,11 +71,11 @@ class FewShotSampler(torch.utils.data.Sampler):
         return self.iters
 
 
-class ConformalMPN(pl.LightningModule):
+class NonconformityNN(pl.LightningModule):
     """Few-shot MPN to compute regression scores."""
 
     def __init__(self, hparams):
-        super(ConformalMPN, self).__init__()
+        super(NonconformityNN, self).__init__()
         if isinstance(hparams, dict):
             hparams = argparse.Namespace(**hparams)
         self.hparams = hparams
@@ -257,7 +258,7 @@ class ConformalMPN(pl.LightningModule):
 
 def main(args):
     pl.seed_everything(args.seed)
-    model = ConformalMPN(hparams=args)
+    model = NonconformityNN(hparams=args)
     print(model)
     if os.path.exists(args.checkpoint_dir) and os.listdir(args.checkpoint_dir):
         if not args.overwrite:
@@ -283,6 +284,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser = ConformalMPN.add_argparse_args(parser)
+    parser = NonconformityNN.add_argparse_args(parser)
     args = parser.parse_args()
     main(args)
