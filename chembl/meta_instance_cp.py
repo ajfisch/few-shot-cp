@@ -82,17 +82,16 @@ def main(args):
             json.dump(trials, f)
 
     print("Will write to %s" % args.output_file)
-    for _ in tqdm.tqdm(range(len(args.epsilons) * len(args.deltas)), "Evaluating settings"):
-        for epsilon in args.epsilons:
-            for delta in args.deltas:
-                result = instance_cp.evaluate_trials(
-                    trials=trials,
-                    tasks=tasks,
-                    epsilon=epsilon,
-                    delta=delta,
-                    task_type="regression",
-                    threads=args.threads)
-                utils.write_result(epsilon, delta, result, args.output_file, overwrite=False)
+    for epsilon in args.epsilons:
+        for delta in args.deltas:
+            result = instance_cp.evaluate_trials(
+                trials=trials,
+                tasks=tasks,
+                epsilon=epsilon,
+                delta=delta,
+                task_type="regression",
+                threads=args.threads)
+            utils.write_result(epsilon, delta, result, args.output_file, overwrite=False)
 
 
 if __name__ == "__main__":
