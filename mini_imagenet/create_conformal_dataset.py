@@ -2,24 +2,21 @@
 
 import argparse
 import json
-import math
 import numpy as np
 import os
 import torch
 import tqdm
 
-import exact_cp
 import quantile_snn
 
 from prototypical_networks.samplers.episodic_batch_sampler import EpisodicBatchSamplerWithClass
-from prototypical_networks.dataloaders.mini_imagenet_loader import MiniImageNet, ROOT_PATH
+from prototypical_networks.dataloaders.mini_imagenet_loader import MiniImageNet
 from prototypical_networks.models.convnet_mini import ConvNet
-from prototypical_networks.models.identity import Identity
-from prototypical_networks.utils import AverageMeter, compute_accuracy, euclidean_dist, mkdir
+from prototypical_networks.utils import euclidean_dist
 from torch.utils.data import DataLoader
 
 
-def predict(s_model, q_model, inputs, args):
+def predict(s_model, q_model, inputs, args, task_inds=None):
     """Predict quantiles and compute baselines for an input batch.
 
     Note that we only compute the baselines for n_query, where we assume
@@ -40,12 +37,12 @@ def predict(s_model, q_model, inputs, args):
     Returns:
         pred_quantiles: [n_way]
         query_scores: [n_way, n_calibration, n_way]
-        exact_pred_sets: [n_way, num_query, # predictions in set]
-        exact_pred_scores: [n_way, num_query, # predictions in set]
+        exact_pred_sets: [n_way, n_query, # predictions in set]
+        exact_pred_scores: [n_way, n_query, # predictions in set]
     """
     p = args.n_support * args.n_way
     # data_support: [n_support * n_way, 3, 84, 84]
-    # data_query: [num_calibration * n_way, 3, 84, 84]
+    # data_query: [n_calibration * n_way, 3, 84, 84]
     data_support, data_query = inputs[:p], inputs[p:]
 
     # Encode images.
@@ -115,13 +112,13 @@ def predict(s_model, q_model, inputs, args):
     class_prototypes = s_model(data_support).view(
         args.n_support, args.n_way, -1).mean(dim=0)
 
-    # [n_way, num_calibration, n_way]
+    # [n_way, n_calibration, n_way]
     query_scores = -1 * euclidean_dist(s_model(data_query), class_prototypes)
     query_scores_by_target = []
     for i in range(args.n_way):
         query_scores_by_target.append(query_scores[i::args.n_way, :].tolist())
 
-    # [n_way, num_calibration, n_way]
+    # [n_way, n_calibration, n_way]
     #query_probs = torch.softmax(query_scores, dim=-1)
 
     # --------------------------------------------------------------------------
@@ -130,8 +127,8 @@ def predict(s_model, q_model, inputs, args):
     # truncate queries to just those necessary for baselines.
     # --------------------------------------------------------------------------
 
-    # [num_query, 3, 84, 84]
-    data_query = data_query[:args.num_query * args.n_way]
+    # [n_query, 3, 84, 84]
+    data_query = data_query[:args.n_query * args.n_way]
 
     # --------------------------------------------------------------------------
     # Step 5.
@@ -143,11 +140,13 @@ def predict(s_model, q_model, inputs, args):
     # for the eventual 1 - epsilon desired coverage.
     # --------------------------------------------------------------------------
 
-    query_embeds = s_model(data_query).view(args.n_way, args.num_query, -1)
+    query_embeds = s_model(data_query).view(args.n_way, args.n_query, -1)
 
     # [n_support, n_way, hidden_dim]
     support_embeds = s_model(data_support).view(
         args.n_support, args.n_way, -1)
+
+    sup_targets = torch.arange(args.n_way).long().repeat(args.n_support)
 
     # [n_way, hidden_dim]
     class_prototypes = support_embeds.mean(dim=0)
@@ -157,21 +156,25 @@ def predict(s_model, q_model, inputs, args):
     for i in range(args.n_way):
         pred_sets = []
         pred_scores = []
-        for j in range(args.num_query):
+        for j in range(args.n_query):
             pred_set = []
             pred_score = []
             for m in range(args.n_way):
                 # Include the query itself in the prototype (moving avg).
-                class_prototypes[m] = (class_prototypes[m] +
-                                       args.n_support * query_embeds[i, j]) / \
+                class_prototypes[m] = (class_prototypes[m] * args.n_support +
+                                       query_embeds[i, j]) / \
                                        (args.n_support + 1)
 
                 # Extracting the non-conformity scores for the support points
                 # of this class.
                 # [n_support]
-                non_comf_scores = -1 * euclidean_dist(
-                    support_embeds[:, i, :],
-                    class_prototypes[i].unsqueeze(0)).squeeze()
+                sup_dists = -1 * euclidean_dist(
+                    support_embeds.view(args.n_support * args.n_way, -1),
+                    class_prototypes)
+
+                # [n_way * n_support]
+                non_comf_scores = sup_dists[torch.arange(
+                    args.n_way * args.n_support), sup_targets]
 
                 # [1, n_way]
                 out_scores = -1 * euclidean_dist(
@@ -183,26 +186,22 @@ def predict(s_model, q_model, inputs, args):
                     non_comf_scores.tolist() + [np.inf],
                     1 - args.epsilon,
                     interpolation="higher")
+
                 if out_scores[m] <= quantile:
-                    pred_set.append(m)
-                    pred_score.append(out_scores[m])
-
-                #pred_labels = np.where(out_scores <= quantile)[0]
-
-                #pred_sets.append(pred_labels.tolist())
-                #pred_scores.append(out_scores[pred_labels].tolist())
+                    cur_task = m if task_inds is None else task_inds[m]
+                    pred_set.append(cur_task)
+                    pred_score.append(out_scores[m].tolist())
 
                 # Revert the prototype (removing query).
                 class_prototypes[m] = (class_prototypes[m] *
-                                       (args.n_support + 1)) - \
-                                       args.n_support * query_embeds[i, j]
+                                       (args.n_support + 1) -
+                                       query_embeds[i, j]) / args.n_support
 
             pred_sets.append(pred_set)
             pred_scores.append(pred_score)
 
         all_pred_sets.append(pred_sets)
         all_pred_scores.append(pred_scores)
-        import ipdb; ipdb.set_trace()
 
     return dict(pred_quantiles=pred_quantiles.tolist(),
                 query_scores=query_scores_by_target,
@@ -227,8 +226,6 @@ def main(args):
     # Load models.
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    #s_model = conformal_mpn.ConformalMPN.load_from_checkpoint(args.s_ckpt).to(device)
-    #s_model.eval()
     checkpoint = torch.load(args.s_ckpt)
     s_model = ConvNet()
     s_model.load_state_dict(checkpoint['state_dict'])
@@ -238,20 +235,21 @@ def main(args):
     q_model = quantile_snn.QuantileSNN.load_from_checkpoint(args.q_ckpt).to(device)
     q_model.eval()
 
-    # Check num_calibration > num_query.
-    assert(args.num_calibration > args.num_query)
+    # Check n_calibration > n_query.
+    assert(args.n_calibration > args.n_query)
 
     # Load data
     split = "val"
     test_dataset = MiniImageNet(split, args.full_path, args.images_path)
+
+    # n_calibration instead of n_query so we'll have enough queries from
+    # the calibration tasks.
     test_sampler = EpisodicBatchSamplerWithClass(test_dataset.labels,
                                                  args.n_episodes, args.n_way,
-                                                 args.n_support + args.num_calibration)
-    #args.n_support + args.num_query)
+                                                 args.n_support + args.n_calibration)
+
     test_loader = DataLoader(dataset=test_dataset, batch_sampler=test_sampler,
                              num_workers=args.num_data_workers, pin_memory=True)
-
-
 
     # Evaluate batches and write examples to disk.
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
@@ -260,7 +258,7 @@ def main(args):
             for n_episode, batch in tqdm.tqdm(enumerate(test_loader, 1), total=args.n_episodes):
                 inputs, tasks = [_.cuda(non_blocking=True) for _ in batch]
                 tasks = tasks.tolist()
-                outputs = predict(s_model, q_model, inputs, args)
+                outputs = predict(s_model, q_model, inputs, args, task_inds=tasks)
                 for i in range(args.n_way):
                     example = dict(
                         pred_quantile=outputs["pred_quantiles"][i],
@@ -279,11 +277,11 @@ if __name__ == "__main__":
     parser.add_argument('--images_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to parent dir with "images" dir.')
     parser.add_argument('--full_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
     parser.add_argument("--n_support", type=int, default=5)
-    parser.add_argument('--n_episodes', default=100, type=int, help='Number of episodes to average')
+    parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
     parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
-    parser.add_argument("--epsilon", type=float, default=0.40)
-    parser.add_argument("--num_query", type=int, default=4)
-    parser.add_argument("--num_calibration", type=int, default=50)
+    parser.add_argument("--epsilon", type=float, default=0.10)
+    parser.add_argument("--n_query", type=int, default=4)
+    parser.add_argument("--n_calibration", type=int, default=50)
     parser.add_argument("--num_data_workers", type=int, default=20)
     parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
     args = parser.parse_args()

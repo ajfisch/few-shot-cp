@@ -39,19 +39,19 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--evaluation_name', type=str, help='Evaluation name')
 parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
-parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
+parser.add_argument('--n_way', default=5, type=int, help='Number of classes per episode')
 parser.add_argument('--n_support', default=5, type=int, help='Number of support samples per class')
 parser.add_argument('--n_query', default=100, type=int, help='Number of query samples')
 parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     default=[
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_0/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_1/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_2/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_3/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way_split_4/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way_split_0/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way_split_1/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way_split_2/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way_split_3/model_best_acc.pth.tar",
+                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way_split_4/model_best_acc.pth.tar",
                              ])
 parser.add_argument("--full_ckpt", type=str,
-                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_16_way/model_best_acc.pth.tar")
+                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way/model_best_acc.pth.tar")
 
 def compute_accuracy(logits, label):
     # Use argmin (unlike propotypical networks code)
