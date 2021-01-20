@@ -1,12 +1,14 @@
 """Compute experiment for instance-wise CP."""
 
+import functools
+import multiprocessing
 import tqdm
 import numpy as np
 from scipy import stats
 from meta_conformal import utils
 
 
-def solve_correction(delta, ecdfs, bound="beta", steps=1000):
+def solve_correction(delta, ecdfs, bound="beta", steps=25):
     """Solve for correction giving (delta, epsilon)-validity."""
 
     def dkw(alpha, nobs, count):
@@ -22,8 +24,14 @@ def solve_correction(delta, ecdfs, bound="beta", steps=1000):
         """Compute pointwise Clopper-Pearson CDF bound."""
         if alpha == 0:
             return [0, 1]
-        ci_lo = stats.beta.ppf(alpha / 2, nobs, count - nobs + 1)
-        ci_hi = stats.beta.ppf(1 - alpha / 2, nobs + 1, count - nobs)
+        if nobs > 0:
+            ci_lo = stats.beta.ppf(alpha / 2, nobs, count - nobs + 1)
+        else:
+            ci_lo = 0
+        if nobs < count:
+            ci_hi = stats.beta.ppf(1 - alpha / 2, nobs + 1, count - nobs)
+        else:
+            ci_hi = 1
         return ci_lo, ci_hi
 
     def correction(alpha):
@@ -47,7 +55,6 @@ def solve_correction(delta, ecdfs, bound="beta", steps=1000):
                 raise NotImplementedError("Unknown method.")
             bound_sum += (b - a) ** 2
         p_hoeffding = -bound_sum / (2 * len(ecdfs) ** 2)
-
         return np.sqrt(p_hoeffding * np.log(p_bound))
 
     # No need to compute.
@@ -77,28 +84,52 @@ def conformalize_quantile(calibration_tasks, epsilon, delta=0):
             ecdfs.append((nobs, count))
         return ecdfs
 
+    def compute_bound(lambda_factor):
+        """Compute full bound."""
+        ecdfs = compute_ecdfs(lambda_factor)
+        n_tasks = len(calibration_tasks) + 1
+        bound = sum([nobs / count for nobs, count in ecdfs]) / n_tasks
+        bound -= solve_correction(delta, ecdfs)
+        return bound
+
+    # Compute with no correction.
+    lambda_factor = 0
+    bound = compute_bound(lambda_factor)
+    if bound == 1 - epsilon:
+        return lambda_factor
+
     # Get range of lambda that change empirical CDFs.
     valid_lambdas = [np.inf]
-    for quantile_pred, scores in calibration_tasks:
-        valid_lambdas.extend(scores[1:] - scores[:-1])
+    for quantile, scores in calibration_tasks:
+        rank = (scores <= quantile).sum()
+        if bound < 1 - epsilon:
+            # Add positive lambdas.
+            for i in range(rank, len(scores)):
+                valid_lambdas.append(scores[i] - scores[rank - 1])
+        else:
+            # Add negative lambdas.
+            for i in range(rank - 1, -1, -1):
+                valid_lambdas.append(scores[rank - 1] - scores[i])
+    valid_lambdas = list(set(valid_lambdas))
 
     # Binary search lambdas to find inf.
-    lambda_factor = np.inf
     valid_lambdas = sorted(valid_lambdas)
+    best_lambda = np.inf
     left = 0
     right = len(valid_lambdas) - 1
     while left <= right:
         # Compute empirical CDFs (with lambda adjustment).
         mid = (left + right) // 2
         lambda_factor = valid_lambdas[mid]
-        ecdfs = compute_ecdfs(lambda_factor)
 
         # Compute full bound (with prob. delta).
-        n_tasks = len(calibration_tasks) + 1
-        bound = sum([nobs / count for nobs, count in ecdfs]) / n_tasks
-        bound -= solve_correction(delta, ecdfs)
+        bound = compute_bound(lambda_factor)
 
-        # Compare to alpha.
+        # Save if best valid so far.
+        if bound >= 1 - epsilon and lambda_factor < best_lambda:
+            best_lambda = lambda_factor
+
+        # Continue search.
         if bound == 1 - epsilon:
             break
         elif bound < 1 - epsilon:
@@ -106,7 +137,7 @@ def conformalize_quantile(calibration_tasks, epsilon, delta=0):
         else:
             right = mid - 1
 
-    return lambda_factor
+    return best_lambda
 
 
 def compute_meta_predictions(calibration, test, epsilon, delta=0, task_type="classification"):
@@ -123,7 +154,7 @@ def compute_meta_predictions(calibration, test, epsilon, delta=0, task_type="cla
         result: average efficiency and accuracy for task N + 1.
     """
     # Step 1: conformalize the quantile prediction on calibration tasks.
-    calibration = [[(ex["pred_quantile"], ex["query_scores"]) for ex in task] for task in calibration]
+    calibration = [(task["pred_quantile"], task["query_scores"]) for task in calibration]
     lambda_factor = conformalize_quantile(calibration, epsilon, delta)
     test_quantile = test["pred_quantile"] + lambda_factor
 
@@ -145,7 +176,40 @@ def compute_meta_predictions(calibration, test, epsilon, delta=0, task_type="cla
     return conformal_pred
 
 
-def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification"):
+def init(_tasks):
+    global tasks
+    tasks = _tasks
+
+
+def evaluate_trial(task_idx, epsilon, delta, task_type):
+    """Worker function."""
+    global tasks
+
+    # Get data.
+    task_samples = []
+    for task_i, example_j in task_idx:
+        task_samples.append(tasks[task_i][example_j])
+
+    # Get calibration/test task split.
+    calibration, test = task_samples[:-1], task_samples[-1]
+
+    # Evaluate uncorrected meta.
+    meta_preds = compute_meta_predictions(
+        calibration=calibration,
+        test=test,
+        epsilon=epsilon,
+        delta=delta,
+        task_type=task_type)
+    meta_result = utils.evaluate(test["query_targets"], meta_preds, task_type)
+
+    # Evaluate exact CP baseline.
+    exact_preds = test["exact_intervals"]
+    exact_result = utils.evaluate(test["query_targets"], exact_preds, task_type)
+
+    return meta_result, exact_result
+
+
+def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification", threads=1):
     """Evaluate conformal prediction over collection of N + 1 tasks.
 
     Args:
@@ -157,29 +221,27 @@ def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification
     """
     meta_results = []
     exact_results = []
-    for task_idx in tqdm.tqdm(trials, desc="Evaluating trials"):
-        # Get data.
-        task_samples = []
-        for task_i, example_j in task_idx:
-            task_samples.append(tasks[task_i][example_j])
 
-        # Get calibration/test task split.
-        calibration, test = task_samples[:-1], task_samples[-1]
+    # Only use multiprocessing with threads > 1.
+    if threads > 0:
+        workers = multiprocessing.Pool(threads, initializer=init, initargs=(tasks,))
+        map_fn = workers.imap_unordered
+    else:
+        map_fn = map
 
-        # Evaluate uncorrected meta.
-        meta_preds = compute_meta_predictions(
-            calibration=calibration,
-            test=test,
-            epsilon=epsilon,
-            delta=delta,
-            task_type=task_type)
-        meta_result = utils.evaluate(test["query_targets"], meta_preds)
-        meta_results.append(meta_result)
+    # Setup trial evaluation function.
+    worker_fn = functools.partial(
+        evaluate_trial,
+        epsilon=epsilon,
+        delta=delta,
+        task_type=task_type)
 
-        # Evaluate exact CP baseline.
-        exact_preds = test["exact_intervals"]
-        exact_result = utils.evaluate(test["query_targets"], exact_preds)
-        exact_results.append(exact_result)
+    # Map all results.
+    with tqdm.tqdm(total=len(trials)) as pbar:
+        for meta_result, exact_result in map_fn(worker_fn, trials):
+            meta_results.append(meta_result)
+            exact_results.append(exact_result)
+            pbar.update()
 
     # Marginal results.
     avg_meta_result = utils.compute_stats(meta_results)
