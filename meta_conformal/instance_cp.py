@@ -193,6 +193,10 @@ def evaluate_trial(task_idx, epsilon, delta, task_type):
     # Get calibration/test task split.
     calibration, test = task_samples[:-1], task_samples[-1]
 
+    # We may have only computed metrics on a subset of full calibration data...
+    # take only up to the first n_test.
+    n_test = min(len(test["query_targets"]), len(test["exact_intervals"]))
+
     # Evaluate uncorrected meta.
     meta_preds = compute_meta_predictions(
         calibration=calibration,
@@ -200,11 +204,11 @@ def evaluate_trial(task_idx, epsilon, delta, task_type):
         epsilon=epsilon,
         delta=delta,
         task_type=task_type)
-    meta_result = utils.evaluate(test["query_targets"], meta_preds, task_type)
+    meta_result = utils.evaluate(test["query_targets"], meta_preds, task_type, n_test)
 
     # Evaluate exact CP baseline.
     exact_preds = test["exact_intervals"]
-    exact_result = utils.evaluate(test["query_targets"], exact_preds, task_type)
+    exact_result = utils.evaluate(test["query_targets"], exact_preds, task_type, n_test)
 
     return meta_result, exact_result
 

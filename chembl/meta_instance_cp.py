@@ -2,7 +2,6 @@
 
 import argparse
 import collections
-import tqdm
 import json
 import numpy as np
 import os

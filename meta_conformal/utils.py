@@ -26,11 +26,13 @@ def compute_stats(results):
     return Result(eff_stats, acc_stats)
 
 
-def evaluate(y_trues, y_preds, task_type="classification"):
+def evaluate(y_trues, y_preds, task_type="classification", n_test=None):
     """Evaluate sequence of predictions and confidence intervals."""
     evals = []
     sizes = []
-    for y_true, y_pred in zip(y_trues, y_preds):
+    for i, (y_true, y_pred) in enumerate(zip(y_trues, y_preds)):
+        if n_test and i >= n_test:
+            break
         if task_type == "regression":
             y_pred = intervals.closed(*y_pred)
             size = y_pred.upper - y_pred.lower
