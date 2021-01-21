@@ -16,7 +16,7 @@ from prototypical_networks.utils import euclidean_dist
 from torch.utils.data import DataLoader
 
 
-def predict(s_model, q_model, inputs, args, task_inds=None):
+def predict(s_model, q_model, inputs, args):
     """Predict quantiles and compute baselines for an input batch.
 
     Note that we only compute the baselines for n_query, where we assume
@@ -36,9 +36,10 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
 
     Returns:
         pred_quantiles: [n_way]
-        query_scores: [n_way, n_calibration, n_way]
-        exact_pred_sets: [n_way, n_query, # predictions in set]
-        exact_pred_scores: [n_way, n_query, # predictions in set]
+        query_scores: [n_way * n_calibration, n_way]
+        query_targets: [n_way * n_calibration]
+        exact_intervals: [n_way * n_query, # predictions in set]
+        exact_pred_scores: [n_way * n_query, # predictions in set]
     """
     p = args.n_support * args.n_way
     # data_support: [n_support * n_way, 3, 84, 84]
@@ -114,9 +115,7 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
 
     # [n_way, n_calibration, n_way]
     query_scores = -1 * euclidean_dist(s_model(data_query), class_prototypes)
-    query_scores_by_target = []
-    for i in range(args.n_way):
-        query_scores_by_target.append(query_scores[i::args.n_way, :].tolist())
+    query_targets = torch.arange(args.n_way).long().repeat(args.n_calibration)
 
     # [n_way, n_calibration, n_way]
     #query_probs = torch.softmax(query_scores, dim=-1)
@@ -140,7 +139,7 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
     # for the eventual alpha desired coverage.
     # --------------------------------------------------------------------------
 
-    query_embeds = s_model(data_query).view(args.n_way, args.n_query, -1)
+    query_embeds = s_model(data_query).view(args.n_query, args.n_way, -1)
 
     # [n_support, n_way, hidden_dim]
     support_embeds = s_model(data_support).view(
@@ -153,10 +152,8 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
 
     all_pred_sets = []
     all_pred_scores = []
-    for i in range(args.n_way):
-        pred_sets = []
-        pred_scores = []
-        for j in range(args.n_query):
+    for i in range(args.n_query):
+        for j in range(args.n_way):
             pred_set = []
             pred_score = []
             for m in range(args.n_way):
@@ -188,8 +185,7 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
                     interpolation="higher")
 
                 if out_scores[m] <= quantile:
-                    cur_task = m if task_inds is None else task_inds[m]
-                    pred_set.append(cur_task)
+                    pred_set.append(m)
                     pred_score.append(out_scores[m].tolist())
 
                 # Revert the prototype (removing query).
@@ -197,15 +193,13 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
                                        (args.n_support + 1) -
                                        query_embeds[i, j]) / args.n_support
 
-            pred_sets.append(pred_set)
-            pred_scores.append(pred_score)
-
-        all_pred_sets.append(pred_sets)
-        all_pred_scores.append(pred_scores)
+            all_pred_sets.append(pred_set)
+            all_pred_scores.append(pred_score)
 
     return dict(pred_quantiles=pred_quantiles.tolist(),
-                query_scores=query_scores_by_target,
-                exact_pred_sets=all_pred_sets,
+                query_scores=query_scores.tolist(),
+                query_targets=query_targets.tolist(),
+                exact_intervals=all_pred_sets,
                 exact_pred_scores=all_pred_scores,
                 )
 
@@ -257,16 +251,15 @@ def main(args):
         with torch.no_grad():
             for n_episode, batch in tqdm.tqdm(enumerate(test_loader, 1), total=args.n_episodes):
                 inputs, tasks = [_.cuda(non_blocking=True) for _ in batch]
-                tasks = tasks.tolist()
-                outputs = predict(s_model, q_model, inputs, args, task_inds=tasks)
-                for i in range(args.n_way):
-                    example = dict(
-                        pred_quantile=outputs["pred_quantiles"][i],
-                        query_scores=outputs["query_scores"][i],
-                        exact_pred_sets=outputs["exact_pred_sets"][i],
-                        exact_pred_scores=outputs["exact_pred_scores"][i],
-                        task=tasks[i])
-                    f.write(json.dumps(example) + "\n")
+                outputs = predict(s_model, q_model, inputs, args)
+                example = dict(
+                    pred_quantile=outputs["pred_quantiles"],
+                    query_scores=outputs["query_scores"],
+                    query_targets=outputs["query_targets"],
+                    exact_intervals=outputs["exact_intervals"],
+                    exact_pred_scores=outputs["exact_pred_scores"],
+                    task="_".join([str(t) for t in sorted(tasks[:args.n_way].tolist())]))
+                f.write(json.dumps(example) + "\n")
 
 
 if __name__ == "__main__":
