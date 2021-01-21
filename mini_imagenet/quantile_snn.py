@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
 
@@ -173,15 +172,15 @@ class QuantileSNN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="results/10_way/quantile_snn")
+        parser.add_argument("--checkpoint_dir", type=str, default="results/5_way/quantile_snn")
         parser.add_argument("--overwrite", type="bool", default=True)
 
         parser.add_argument("--batch_size", type=int, default=64)
         parser.add_argument("--max_epochs", type=int, default=15)
 
         parser.add_argument("--num_data_workers", type=int, default=20)
-        parser.add_argument("--train_data", type=str, default="results/10_way/train_quantile.jsonl")
-        parser.add_argument("--val_data", type=str, default="results/10_way/val_quantile.jsonl")
+        parser.add_argument("--train_data", type=str, default="results/5_way/train_quantile.jsonl")
+        parser.add_argument("--val_data", type=str, default="results/5_way/val_quantile.jsonl")
 
         parser.add_argument("--alpha", type=float, default=0.8)
         parser.add_argument("--set_hidden_size", type=int, default=64)

@@ -137,7 +137,7 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
     # each query is added to the support set.
     #
     # This gives the prediction set directly, not quantiles, so we compute it
-    # for the eventual 1 - epsilon desired coverage.
+    # for the eventual alpha desired coverage.
     # --------------------------------------------------------------------------
 
     query_embeds = s_model(data_query).view(args.n_way, args.n_query, -1)
@@ -184,7 +184,7 @@ def predict(s_model, q_model, inputs, args, task_inds=None):
                 # Include k + 1 point (inf) and compute the quantile.
                 quantile = np.quantile(
                     non_comf_scores.tolist() + [np.inf],
-                    1 - args.epsilon,
+                    args.alpha,
                     interpolation="higher")
 
                 if out_scores[m] <= quantile:
@@ -271,18 +271,18 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn_09/weights.pt.ckpt")
-    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_20_way/model_best_acc.pth.tar")
+    parser.add_argument("--q_ckpt", type=str, default="results/5_way/quantile_snn/q=0.70/weights.pt.ckpt")
+    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way/model_best_acc.pth.tar")
 
     parser.add_argument('--images_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to parent dir with "images" dir.')
     parser.add_argument('--full_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
-    parser.add_argument("--n_support", type=int, default=5)
     parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
-    parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
-    parser.add_argument("--epsilon", type=float, default=0.10)
-    parser.add_argument("--n_query", type=int, default=4)
-    parser.add_argument("--n_calibration", type=int, default=50)
-    parser.add_argument("--num_data_workers", type=int, default=20)
+    parser.add_argument("--n_support", type=int, default=5)
+    parser.add_argument('--n_way', default=5, type=int, help='Number of classes per episode')
+    parser.add_argument("--alpha", type=float, default=0.70)
+    parser.add_argument("--n_query", type=int, default=5)
+    parser.add_argument("--n_calibration", type=int, default=200)
+    parser.add_argument("--num_data_workers", type=int, default=10)
     parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
     args = parser.parse_args()
     main(args)
