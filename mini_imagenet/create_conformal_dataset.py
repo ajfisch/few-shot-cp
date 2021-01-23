@@ -77,14 +77,14 @@ def predict(s_model, q_model, inputs, args):
             0, support_idx).mean(dim=0)
         s_logits = euclidean_dist(query, support_proto)
         s_scores = s_logits.diag().tolist()
-        s_probs = torch.softmax(s_logits, dim=1).diag().tolist()
+        s_probs = (-1 * torch.softmax(s_logits, dim=1).diag()).tolist()
         for i, s in enumerate(s_scores):
             all_s_scores[i].append(s)
             all_s_probs[i].append(s_probs[i])
 
     # [n_way, n_support]
-    loo_scores = torch.tensor(all_s_scores).to(q_model.device)
-    #loo_probs = torch.tensor(all_s_probs).to(q_model.device)
+    #loo_scores = torch.tensor(all_s_scores).to(q_model.device)
+    loo_probs = torch.tensor(all_s_probs).to(q_model.device)
 
 
     # --------------------------------------------------------------------------
@@ -97,7 +97,7 @@ def predict(s_model, q_model, inputs, args):
     # --------------------------------------------------------------------------
 
     # [n_way]
-    pred_quantiles = q_model.predict(scores=loo_scores)
+    pred_quantiles = q_model.predict(scores=loo_probs)
 
     # --------------------------------------------------------------------------
     # Step 3.
@@ -114,11 +114,11 @@ def predict(s_model, q_model, inputs, args):
         args.n_support, args.n_way, -1).mean(dim=0)
 
     # [n_way, n_calibration, n_way]
-    query_scores = -1 * euclidean_dist(s_model(data_query), class_prototypes)
+    query_scores = euclidean_dist(s_model(data_query), class_prototypes)
     query_targets = torch.arange(args.n_way).long().repeat(args.n_calibration)
 
     # [n_way, n_calibration, n_way]
-    #query_probs = torch.softmax(query_scores, dim=-1)
+    query_probs = (-1 * torch.softmax(query_scores, dim=-1))
 
     # --------------------------------------------------------------------------
     # step 4.
@@ -150,12 +150,14 @@ def predict(s_model, q_model, inputs, args):
     # [n_way, hidden_dim]
     class_prototypes = support_embeds.mean(dim=0)
 
-    all_pred_sets = []
-    all_pred_scores = []
+    #all_pred_sets = []
+    all_pred_probs = []
+    all_non_comfs = []
     for i in range(args.n_query):
         for j in range(args.n_way):
             pred_set = []
             pred_score = []
+            non_comf = []
             for m in range(args.n_way):
                 # Include the query itself in the prototype (moving avg).
                 class_prototypes[m] = (class_prototypes[m] * args.n_support +
@@ -164,43 +166,50 @@ def predict(s_model, q_model, inputs, args):
 
                 # Extracting the non-conformity scores for the support points
                 # of this class.
+                # [n_support, n_way]
+                sup_dists = euclidean_dist(support_embeds[:,m,:], class_prototypes)
+
                 # [n_support]
-                sup_dists = -1 * euclidean_dist(
-                    support_embeds.view(args.n_support * args.n_way, -1),
-                    class_prototypes)
+                non_comf_scores = -1 * torch.softmax(sup_dists, dim=-1)[:,m]
 
-                # [n_way * n_support]
-                non_comf_scores = sup_dists[torch.arange(
-                    args.n_way * args.n_support), sup_targets]
-
-                # [1, n_way]
-                out_scores = -1 * euclidean_dist(
+                # [n_way]
+                out_dists = euclidean_dist(
                     query_embeds[i, j].unsqueeze(0),
-                    class_prototypes).squeeze().cpu().numpy()
+                    class_prototypes).squeeze()
 
-                # Include k + 1 point (inf) and compute the quantile.
-                quantile = np.quantile(
-                    non_comf_scores.tolist() + [np.inf],
-                    args.alpha,
-                    interpolation="higher")
+                # [n_way]
+                out_probs = (-1 * torch.softmax(out_dists, dim=-1)).tolist()
 
-                if out_scores[m] <= quantile:
-                    pred_set.append(m)
-                    pred_score.append(out_scores[m].tolist())
+                # Legacy (constract prediction set).
+                if False:
+                    # Include k + 1 point (inf) and compute the quantile.
+                    quantile = np.quantile(
+                        non_comf_scores.tolist() + [np.inf],
+                        args.alpha,
+                        interpolation="higher")
 
-                # Revert the prototype (removing query).
-                class_prototypes[m] = (class_prototypes[m] *
-                                       (args.n_support + 1) -
-                                       query_embeds[i, j]) / args.n_support
+                    if out_probs[m] <= quantile:
+                        pred_set.append(m)
+                        pred_score.append(out_probs[m].tolist())
 
-            all_pred_sets.append(pred_set)
-            all_pred_scores.append(pred_score)
+                    # Revert the prototype (removing query).
+                    class_prototypes[m] = (class_prototypes[m] *
+                                           (args.n_support + 1) -
+                                           query_embeds[i, j]) / args.n_support
+
+                pred_score.append(out_probs[m])
+                non_comf.append(non_comf_scores.tolist())
+
+            #all_pred_sets.append(pred_set)
+            all_pred_probs.append(pred_score)
+            all_non_comfs.append(non_comf)
 
     return dict(pred_quantiles=pred_quantiles.tolist(),
-                query_scores=query_scores.tolist(),
+                query_scores=query_probs.tolist(),
                 query_targets=query_targets.tolist(),
-                exact_intervals=all_pred_sets,
-                exact_pred_scores=all_pred_scores,
+                #exact_intervals=all_pred_sets,
+                exact_pred_scores=all_pred_probs,
+                exact_non_comfs=all_non_comfs,
                 )
 
 
@@ -256,26 +265,27 @@ def main(args):
                     pred_quantile=outputs["pred_quantiles"],
                     query_scores=outputs["query_scores"],
                     query_targets=outputs["query_targets"],
-                    exact_intervals=outputs["exact_intervals"],
+                    #exact_intervals=outputs["exact_intervals"],
                     exact_pred_scores=outputs["exact_pred_scores"],
+                    exact_non_comfs=outputs["exact_non_comfs"],
                     task="_".join([str(t) for t in sorted(tasks[:args.n_way].tolist())]))
                 f.write(json.dumps(example) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="results/5_way/quantile_snn/q=0.70/weights.pt.ckpt")
-    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_5_shot_5_way/model_best_acc.pth.tar")
+    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn/q=0.70/weights.pt.ckpt")
+    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way/model_best_acc.pth.tar")
 
     parser.add_argument('--images_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to parent dir with "images" dir.')
     parser.add_argument('--full_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
     parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
-    parser.add_argument("--n_support", type=int, default=5)
-    parser.add_argument('--n_way', default=5, type=int, help='Number of classes per episode')
+    parser.add_argument("--n_support", type=int, default=16)
+    parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
     parser.add_argument("--alpha", type=float, default=0.70)
     parser.add_argument("--n_query", type=int, default=5)
     parser.add_argument("--n_calibration", type=int, default=200)
-    parser.add_argument("--num_data_workers", type=int, default=10)
+    parser.add_argument("--num_data_workers", type=int, default=30)
     parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
     args = parser.parse_args()
     main(args)
