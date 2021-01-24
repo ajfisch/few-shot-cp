@@ -192,10 +192,10 @@ def predict(s_model, q_model, inputs, args):
                         pred_set.append(m)
                         pred_score.append(out_probs[m].tolist())
 
-                    # Revert the prototype (removing query).
-                    class_prototypes[m] = (class_prototypes[m] *
-                                           (args.n_support + 1) -
-                                           query_embeds[i, j]) / args.n_support
+                # Revert the prototype (removing query).
+                class_prototypes[m] = (class_prototypes[m] *
+                                       (args.n_support + 1) -
+                                       query_embeds[i, j]) / args.n_support
 
                 pred_score.append(out_probs[m])
                 non_comf.append(non_comf_scores.tolist())
