@@ -64,7 +64,7 @@ def main(args):
 
     if not args.output_file:
         args.output_file = os.path.splitext(args.trials_file)[0]
-        args.output_file += "-results.jsonl"
+        args.output_file += "-results.json"
         os.makedirs(os.path.dirname(args.trials_file), exist_ok=True)
 
     if args.overwrite_results:
@@ -88,21 +88,22 @@ def main(args):
                 tasks=tasks,
                 epsilon=epsilon,
                 delta=delta,
-                task_type="regression",
+                task_type="classification",
                 threads=args.threads)
             utils.write_result(epsilon, delta, result, args.output_file, overwrite=False)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_file", type=str, default="../ckpts/chembl/k=16/conformal/q=0.80/val.jsonl")
+    parser.add_argument("--dataset_file", type=str,
+                        default="../ckpts/mini_imagenet/16_shot_10_way/q=0.70/conf_val.jsonl")
     parser.add_argument("--output_file", type=str, default=None)
     parser.add_argument("--trials_file", type=str, default=None)
     parser.add_argument("--num_trials", type=int, default=2000)
     parser.add_argument("--overwrite_trials", action="store_true")
     parser.add_argument("--overwrite_results", action="store_true")
-    parser.add_argument("--tolerances", nargs="+", type=float, default=[.80])
+    parser.add_argument("--tolerances", nargs="+", type=float, default=[.70])
     parser.add_argument("--deltas", nargs="+", type=float, default=[0])
-    parser.add_argument("--threads", type=int, default=30)
+    parser.add_argument("--threads", type=int, default=35)
     args = parser.parse_args()
     main(args)

@@ -4,6 +4,7 @@ import collections
 import json
 import numpy as np
 import intervals
+from meta_conformal import rrcm
 
 Result = collections.namedtuple("Result", ["eff", "acc"])
 
@@ -57,3 +58,41 @@ def write_result(epsilon, delta, result, filename, overwrite=False):
         result = {k: dict(v._asdict()) for k, v in result.items()}
         result = {"epsilon": epsilon, "delta": delta, "result": result}
         f.write(json.dumps(result) + "\n")
+
+
+def exact_interval_regression(epsilon, calibration, calibration_targets, test, l2_lambda):
+    """Compute RRCM exact conformal interval.
+
+    Args:
+        epsilon: Tolerance.
+        calibration: [n_support, n_dim]
+        calibration_targets: [n_support]
+        test: [n_dim]
+        l2_lambda: Regularization parameter.
+
+    Returns:
+       interval: [lower, higher]
+    """
+    X = np.concatenate([calibration, np.expand_dims(test, 0)], axis=0)
+    Y_ = calibration_targets
+    return rrcm.conf_pred(X, Y_, l2_lambda, epsilon)
+
+
+def exact_interval_classification(epsilon, calibration, test):
+    """Compute full conformal prediction interval.
+
+    Args:
+        epsilon: Tolerance.
+        calibration: [n_label, n_support]
+        test: [n_label]
+
+    Returns:
+       interval: {y : y <= quantile}
+    """
+    pred_set = []
+    for y, y_score in enumerate(test):
+        scores = np.concatenate([calibration[y], [np.inf]])
+        quantile = np.quantile(scores, 1 - epsilon, interpolation="higher")
+        if y_score <= quantile:
+            pred_set.append(y)
+    return pred_set

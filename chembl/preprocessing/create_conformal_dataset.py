@@ -2,11 +2,9 @@
 
 import argparse
 import json
-import numpy as np
 import os
 import torch
 import tqdm
-import rrcm
 
 from modeling import nonconformity
 from modeling import quantile
@@ -23,8 +21,7 @@ def predict(s_model, q_model, inputs, args):
        2) Predict the leave-out-none quantile.
        3) Compute the leave-out-none query scores.
        4) Change query to only have n_query values instead of n_calibration.
-       5) Compute the exact conformal prediction baseline.
-       6) Compute the jacknife+ conformal prediction baseline.
+       5) Provide exact conformal prediction inputs.
 
     Args:
         s_model: NonconformityNN model.
@@ -35,8 +32,8 @@ def predict(s_model, q_model, inputs, args):
         pred_quantiles: [batch_size]
         query_preds: [batch_size, n_calibration]
         query_targets: [batch_size, n_calibration]
-        exact_intervals: [batch_size, n_query, 2]
-        jk_intervals: [batch_size, n_query, 2]
+        support_encs: [batch_size, n_support, dim]
+        query_encs: [batch_size, n_query, dim]
     """
     batch_size = args.batch_size
     n_calibration = args.num_calibration
@@ -135,39 +132,13 @@ def predict(s_model, q_model, inputs, args):
     # [batch_size, n_query, dim]
     query = query[:, :n_query]
 
-    # --------------------------------------------------------------------------
-    # Step 5.
-    #
-    # Exact conformal prediction baseline using RRCM. We use the *unconditional*
-    # molecule embeddings from the nonconformity model as fixed input features
-    # to the ridge regressor. The ridge regression is done following exact CP.
-    #
-    # This gives confidence intervals directly, not quantiles, so we compute it
-    # for the eventual 1 - epsilon desired coverage.
-    # --------------------------------------------------------------------------
-
-    # [batch_size, n_query, 2]
-    exact_intervals = np.zeros((batch_size, n_query, 2))
-
-    # Meta-learned regularization parameter.
-    lambda_ = s_model.head.l2_regularizer.exp().item()
-
-    for i in range(batch_size):
-        for j in range(n_query):
-            X = torch.cat([support[i], query[i, j].unsqueeze(0)], dim=0)
-            Y_ = support_targets[i]
-            pred = rrcm.conf_pred(
-                X=X.cpu().numpy(),
-                Y_=Y_.cpu().numpy(),
-                lambda_=lambda_,
-                alpha=args.epsilon)
-            exact_intervals[i, j] = pred
-
     return dict(pred_quantiles=pred_quantiles.tolist(),
                 query_preds=query_preds.tolist(),
                 query_targets=query_targets.tolist(),
                 query_scores=query_scores.tolist(),
-                exact_intervals=exact_intervals.tolist())
+                support_encs=support.tolist(),
+                support_targets=support_targets.tolist(),
+                query_encs=query.tolist())
 
 
 def main(args):
@@ -212,6 +183,9 @@ def main(args):
         num_workers=args.num_data_workers,
         collate_fn=nonconformity.construct_molecule_batch)
 
+    # Meta-learned regularization parameter.
+    l2_lambda = s_model.head.l2_regularizer.exp().item()
+
     # Evaluate batches and write examples to disk.
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     with open(args.output_file, "w") as f:
@@ -224,7 +198,10 @@ def main(args):
                         query_preds=outputs["query_preds"][i],
                         query_scores=outputs["query_scores"][i],
                         query_targets=outputs["query_targets"][i],
-                        exact_intervals=outputs["exact_intervals"][i],
+                        support_encs=outputs["support_encs"][i],
+                        support_targets=outputs["support_targets"][i],
+                        query_encs=outputs["query_encs"][i],
+                        l2_lambda=l2_lambda,
                         task=tasks[i])
                     f.write(json.dumps(example) + "\n")
 
@@ -237,9 +214,9 @@ if __name__ == "__main__":
     parser.add_argument("--features_file", type=str, default="../data/chembl/features/val_molecules.npy")
     parser.add_argument("--tolerance", type=float, default=0.90)
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_query", type=int, default=4)
+    parser.add_argument("--num_query", type=int, default=10)
     parser.add_argument("--num_calibration", type=int, default=250)
-    parser.add_argument("--num_samples", type=int, default=50000)
+    parser.add_argument("--num_samples", type=int, default=25000)
     parser.add_argument("--num_data_workers", type=int, default=20)
     parser.add_argument("--output_file", type=str, default="../ckpts/chembl/k=10/conformal/q=0.90/val.jsonl")
     args = parser.parse_args()

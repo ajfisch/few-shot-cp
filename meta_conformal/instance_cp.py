@@ -154,24 +154,43 @@ def compute_meta_predictions(calibration, test, epsilon, delta=0, task_type="cla
         result: average efficiency and accuracy for task N + 1.
     """
     # Step 1: conformalize the quantile prediction on calibration tasks.
-    calibration = [(task["pred_quantile"], task["query_scores"]) for task in calibration]
-    lambda_factor = conformalize_quantile(calibration, epsilon, delta)
-    test_quantile = test["pred_quantile"] + lambda_factor
+    data = []
+    for task in calibration:
+        quantile = task["pred_quantile"]
+        if task_type == "regression":
+            # Query score is assumed to be |query_pred - query_target|.
+            scores = task["query_scores"]
+        else:
+            # Query score is assumed to be score of correct class.
+            # For now, we do "mondrian" conformal prediction (per class).
+            scores = [[] for _ in range(len(quantile))]
+            for s, t in zip(task["query_scores"], task["query_targets"]):
+                scores[t].append(s[t])
+            scores = np.array(scores)
+        data.append((quantile, scores))
+
+    if task_type == "regression":
+        lambda_factor = conformalize_quantile(data, epsilon, delta)
+    else:
+        lambda_factor = []
+        for i in range(len(data[0][0])):
+            data_i = [(q[i], s[i]) for q, s in data]
+            lambda_factor.append(conformalize_quantile(data_i, epsilon, delta))
 
     # Step 2: Compute intervals on test.
     conformal_pred = []
     if task_type == "regression":
+        test_quantile = test["pred_quantile"] + lambda_factor
         for y in test["query_preds"]:
             conformal_pred.append((y - test_quantile, y + test_quantile))
-    elif task_type == "classification":
+    else:
         for label_scores in test["query_scores"]:
             kept_labels = []
             for i, v_y in enumerate(label_scores):
+                test_quantile = test["pred_quantile"][i] + lambda_factor[i]
                 if v_y <= test_quantile:
                     kept_labels.append(i)
             conformal_pred.append(kept_labels)
-    else:
-        raise ValueError("Unknown type %s" % task_type)
 
     return conformal_pred
 
@@ -195,9 +214,12 @@ def evaluate_trial(task_idx, epsilon, delta, task_type):
 
     # We may have only computed metrics on a subset of full calibration data...
     # take only up to the first n_test.
-    n_test = min(len(test["query_targets"]), len(test["exact_intervals"]))
+    if task_type == "regression":
+        n_test = min(len(test["query_targets"]), len(test["query_encs"]))
+    else:
+        n_test = min(len(test["query_targets"]), len(test["exact_pred_scores"]))
 
-    # Evaluate uncorrected meta.
+    # Evaluate meta.
     meta_preds = compute_meta_predictions(
         calibration=calibration,
         test=test,
@@ -207,7 +229,21 @@ def evaluate_trial(task_idx, epsilon, delta, task_type):
     meta_result = utils.evaluate(test["query_targets"], meta_preds, task_type, n_test)
 
     # Evaluate exact CP baseline.
-    exact_preds = test["exact_intervals"]
+    exact_preds = []
+    for i in range(n_test):
+        if task_type == "classification":
+            exact_pred = utils.exact_interval_classification(
+                epsilon=epsilon,
+                calibration=test["exact_non_comfs"][i],
+                test=test["exact_pred_scores"][i])
+        else:
+            exact_pred = utils.exact_interval_regression(
+                epsilon=epsilon,
+                calibration=test["support_encs"],
+                calibration_targets=test["support_targets"],
+                test=test["query_encs"][i],
+                l2_lambda=test["l2_lambda"])
+        exact_preds.append(exact_pred)
     exact_result = utils.evaluate(test["query_targets"], exact_preds, task_type, n_test)
 
     return meta_result, exact_result
@@ -226,11 +262,15 @@ def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification
     meta_results = []
     exact_results = []
 
+    if task_type not in ["classification", "regression"]:
+        raise ValueError("Unknown task type.")
+
     # Only use multiprocessing with threads > 1.
-    if threads > 0:
+    if threads > 1:
         workers = multiprocessing.Pool(threads, initializer=init, initargs=(tasks,))
         map_fn = workers.imap_unordered
     else:
+        init(tasks)
         map_fn = map
 
     # Setup trial evaluation function.
