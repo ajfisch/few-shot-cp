@@ -38,8 +38,8 @@ def predict(s_model, q_model, inputs, args):
         pred_quantiles: [n_way]
         query_scores: [n_way * n_calibration, n_way]
         query_targets: [n_way * n_calibration]
-        exact_intervals: [n_way * n_query, # predictions in set]
-        exact_pred_scores: [n_way * n_query, # predictions in set]
+        exact_pred_scores: [n_way * n_query, n_way]
+        exact_non_comfs: [n_way * n_query, n_way, n_support]
     """
     p = args.n_support * args.n_way
     # data_support: [n_support * n_way, 3, 84, 84]
@@ -113,11 +113,11 @@ def predict(s_model, q_model, inputs, args):
     class_prototypes = s_model(data_support).view(
         args.n_support, args.n_way, -1).mean(dim=0)
 
-    # [n_way, n_calibration, n_way]
+    # [n_way * n_calibration, n_way]
     query_scores = euclidean_dist(s_model(data_query), class_prototypes)
     query_targets = torch.arange(args.n_way).long().repeat(args.n_calibration)
 
-    # [n_way, n_calibration, n_way]
+    # [n_way * n_calibration, n_way]
     query_probs = (-1 * torch.softmax(query_scores, dim=-1))
 
     # --------------------------------------------------------------------------

@@ -93,10 +93,7 @@ def euclidean_dist(a, b):
     return logits
 
 
-def run_fold(dataset_dir, ckpt, args, f_name='val_wiki'):
-    # Load model
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    
+def load_model(ckpt, device, args):
     # Note: only cnn works for now...
     if args.encoder == 'cnn':
         try:
@@ -163,6 +160,13 @@ def run_fold(dataset_dir, ckpt, args, f_name='val_wiki'):
         own_state[name].copy_(param)
 
     model = model.to(device)
+    return model, sentence_encoder
+
+
+def run_fold(dataset_dir, ckpt, args, f_name='val_wiki'):
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model, sentence_encoder = load_model(ckpt, device, args)
     model.eval()
 
     test_data_loader = get_loader_wclass(f_name, sentence_encoder,
@@ -183,7 +187,7 @@ def run_fold(dataset_dir, ckpt, args, f_name='val_wiki'):
                     query[k] = query[k].cuda()
                 labels = labels.cuda()
 
-            # [n_way * n_support, model.hidden_size]
+            # [n_way, n_support, model.hidden_size]
             support_emb = model.sentence_encoder(support).view(args.n_way, args.n_support, -1)
 
             # === Evaluate on Kth support using K-1 support set. ===
@@ -285,7 +289,8 @@ def main():
     args = parser.parse_args()
     if args.pair:
         raise NotImplementedError
-    assert(args.batch_size == 1)
+    assert args.batch_size == 1
+    assert not args.dot
 
     options = vars(args)
     printer = pprint.PrettyPrinter()
