@@ -3,7 +3,7 @@
 K=16
 set -ex
 
-for q in 95 90 80 70 60; do
+for q in 05; do
     python preprocessing/create_conformal_dataset.py \
          --q_ckpt "../ckpts/chembl/k=$K/quantile/q=0.$q/model.pt" \
          --s_ckpt "../ckpts/chembl/k=$K/nonconformity/full/model.pt" \

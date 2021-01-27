@@ -36,7 +36,10 @@ def evaluate(y_trues, y_preds, task_type="classification", n_test=None):
             break
         if task_type == "regression":
             y_pred = intervals.closed(*y_pred)
-            size = y_pred.upper - y_pred.lower
+            if y_pred.upper <= y_pred.lower:
+                size = 0
+            else:
+                size = y_pred.upper - y_pred.lower
         elif task_type == "classification":
             size = len(y_pred)
         else:

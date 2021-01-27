@@ -1,7 +1,7 @@
 #! /bin/bash
 K=16
 
-for quantile in 0.95 0.90 0.80 0.70 0.60; do
+for quantile in 0.05; do
     echo python modeling/quantile.py \
          --checkpoint_dir "../ckpts/chembl/k=$K/quantile/q=${quantile}" \
          --train_data "../ckpts/chembl/k=$K/nonconformity/train_quantile.jsonl" \

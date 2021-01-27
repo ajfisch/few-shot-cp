@@ -171,7 +171,8 @@ class QuantileNN(pl.LightningModule):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
-        parser.add_argument("--checkpoint_dir", type=str, default="../ckpts/chembl/debug/quantile_snn")
+        parser.add_argument("--checkpoint_dir", type=str,
+                            default="../ckpts/chembl/debug/quantile_snn")
         parser.add_argument("--overwrite", type="bool", default=True)
 
         parser.add_argument("--batch_size", type=int, default=64)
@@ -179,10 +180,14 @@ class QuantileNN(pl.LightningModule):
         parser.add_argument("--max_epochs", type=int, default=15)
 
         parser.add_argument("--num_data_workers", type=int, default=20)
-        parser.add_argument("--train_data", type=str, default="../ckpts/chembl/k=10/nonconformity/train_quantile.jsonl")
-        parser.add_argument("--train_features", type=str, default="../data/chembl/features/train_molecules.npy")
-        parser.add_argument("--val_data", type=str, default="../ckpts/chembl/k=10/nonconformity/val_quantile.jsonl")
-        parser.add_argument("--val_features", type=str, default="../data/chembl/features/val_molecules.npy")
+        parser.add_argument("--train_data", type=str,
+                            default="../ckpts/chembl/k=10/nonconformity/train_quantile.jsonl")
+        parser.add_argument("--train_features", type=str,
+                            default="../data/chembl/features/train_molecules.npy")
+        parser.add_argument("--val_data", type=str,
+                            default="../ckpts/chembl/k=10/nonconformity/val_quantile.jsonl")
+        parser.add_argument("--val_features", type=str,
+                            default="../data/chembl/features/val_molecules.npy")
 
         parser.add_argument("--alpha", type=float, default=0.9)
         parser.add_argument("--use_adaptive_encoding", type="bool", default=True)
@@ -212,7 +217,7 @@ def main(args):
         else:
             shutil.rmtree(args.checkpoint_dir)
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        filepath=os.path.join(args.checkpoint_dir, "weights.pt"),
+        filepath=os.path.join(args.checkpoint_dir, "model.pt"),
         save_top_k=1,
         verbose=True,
         monitor="val_loss",
@@ -226,6 +231,8 @@ def main(args):
         max_epochs=args.max_epochs,
         terminate_on_nan=True)
     trainer.fit(model)
+    shutil.copyfile(checkpoint_callback.best_model_path,
+                    os.path.join(args.checkpoint_dir, "model.pt"))
 
 
 if __name__ == "__main__":
