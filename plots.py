@@ -89,20 +89,20 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
                 all_y[i] = values[i][0]
 
     all_x = sorted(list(all_x))
-    plt.plot(all_x, all_x, "--", color="k", label="diagonal")
-
-    y = [all_y[i][0] for i in all_x]
-    low = [all_y[i][2] for i in all_x]
-    high = [all_y[i][3] for i in all_x]
-    plt.fill_between(all_x, low, high, alpha=0.2)
-    plt.plot(all_x, y, '-', label="Meta")
+    plt.plot(all_x, all_x, "--", color="k", label="diagonal", linewidth=2)
 
     x = sorted(exact.keys())
     y = [exact[i][0][0] for i in x]
     low = [exact[i][0][2] for i in all_x]
     high = [exact[i][0][3] for i in all_x]
     plt.fill_between(x, low, high, alpha=0.2)
-    plt.plot(x, y, '-', label="Exact")
+    plt.plot(x, y, '-.', label="Exact", linewidth=2)
+
+    y = [all_y[i][0] for i in all_x]
+    low = [all_y[i][2] for i in all_x]
+    high = [all_y[i][3] for i in all_x]
+    plt.fill_between(all_x, low, high, alpha=0.2)
+    plt.plot(all_x, y, '-', label="Meta", linewidth=2)
 
     plt.xlabel("1 - $\epsilon$")
     plt.ylabel("Accuracy")
@@ -135,18 +135,18 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
 
     all_x = sorted(list(all_x))
 
-    y = [min(all_y[i][0], 2*max_size) for i in all_x]
-    low = [all_y[i][2] for i in all_x]
-    high = [all_y[i][3] for i in all_x]
-    plt.fill_between(all_x, low, high, alpha=0.2)
-    plt.plot(all_x, y, '-', label="Meta")
-
     x = sorted(exact.keys())
     y = [min(exact[i][1][0], 2*max_size) for i in x]
     low = [exact[i][1][2] for i in x]
     high = [exact[i][1][3] for i in x]
     plt.fill_between(x, low, high, alpha=0.2)
-    plt.plot(x, y, '-', label="Exact")
+    plt.plot(x, y, '-.', label="Exact", linewidth=2)
+
+    y = [min(all_y[i][0], 2*max_size) for i in all_x]
+    low = [all_y[i][2] for i in all_x]
+    high = [all_y[i][3] for i in all_x]
+    plt.fill_between(all_x, low, high, alpha=0.2)
+    plt.plot(all_x, y, '-', label="Meta", linewidth=2)
 
     plt.xlabel("1 - $\epsilon$")
     plt.ylabel("Size")
@@ -165,7 +165,34 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
             qq = float(q)
             exact_values = exact[float(q)]
             f.write("%2.2f & %2.2f & %2.2f & %2.2f & %2.2f \\\\ \n" % (qq, meta[q][qq][0][0], exact_values[0][0], meta[q][qq][1][0], exact_values[1][0]))
-    
+
+def plot_quantile_convergence(output_dir, dpi=100):
+    ks = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    path = "/data/rsg/nlp/tals/coverage/meta_cp/few-shot-cp/fewrel/results/10_way/k=%s/q=0.80/logs/default/version_1/metrics.csv"
+
+    losses = []
+    for k in ks:
+        p = path % 2**k
+        with open(p, 'r') as f:
+            last_line = f.readlines()[-1].strip()
+        val_loss = float(last_line.split(',')[-1])
+        losses.append(val_loss)
+
+    x = ks
+    y = losses
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
+    ax.set_ylim(0.0, 1.05*max(y))
+    ax.set_xlim(0.9, 1.01*max(x))
+    plt.plot(x, y, '-', label="loss", linewidth=2)
+    plt.xlabel("$log_2(k)$")
+    plt.ylabel("Validation loss")
+
+    out_path = os.path.join(output_dir, "quantile_loss.png")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=dpi)
+    plt.close()
+
 
 
 def main(_):
@@ -178,6 +205,7 @@ def main(_):
     if FLAGS.path_nlp:
         plot_task(FLAGS.qs, FLAGS.path_nlp, "nlp", FLAGS.output_dir, max_size=10, dpi=FLAGS.dpi)
 
+    plot_quantile_convergence(FLAGS.output_dir, dpi=FLAGS.dpi)
 
 
 if __name__ == "__main__":

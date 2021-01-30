@@ -1,4 +1,4 @@
-"""Quantile prediction for mini_imagenet using a deep set NN."""
+"""Quantile prediction using a deep set NN."""
 
 import argparse
 import collections
@@ -106,12 +106,24 @@ class QuantileSNN(pl.LightningModule):
         inputs, _ = batch
         return self.forward(inputs)
 
+    def test_step(self, batch, batch_idx):
+        inputs, _ = batch
+        return self.forward(inputs)
+
     def validation_epoch_end(self, outputs):
         loss = torch.cat([x["loss"].detach() for x in outputs], dim=0).mean()
         tensorboard_logs = {"val_loss": loss}
         tqdm_dict = tensorboard_logs
         #return {"val_loss": loss, "progress_bar": tqdm_dict, "log": tensorboard_logs}
         self.log("val_loss", loss)
+        return
+
+    def test_epoch_end(self, outputs):
+        loss = torch.cat([x["loss"].detach() for x in outputs], dim=0).mean()
+        tensorboard_logs = {"test_loss": loss}
+        tqdm_dict = tensorboard_logs
+        #return {"val_loss": loss, "progress_bar": tqdm_dict, "log": tensorboard_logs}
+        self.log("test_loss", loss)
         return
 
     def configure_optimizers(self):
@@ -164,6 +176,9 @@ class QuantileSNN(pl.LightningModule):
             collate_fn=construct_batch)
         return loader
 
+    def test_dataloader(self):
+        return self.val_dataloader()
+
     @staticmethod
     def add_argparse_args(parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], conflict_handler="resolve", add_help=False)
@@ -173,7 +188,8 @@ class QuantileSNN(pl.LightningModule):
         parser.add_argument("--gpus", type=int, nargs="+", default=None)
         parser.add_argument("--learning_rate", type=float, default=0.001)
         parser.add_argument("--checkpoint_dir", type=str, default="results/10_way/quantile_snn")
-        parser.add_argument("--overwrite", type="bool", default=True)
+        parser.add_argument("--overwrite", type="bool", default=False)
+        parser.add_argument("--only_test", type="bool", default=False)
 
         parser.add_argument("--batch_size", type=int, default=64)
         parser.add_argument("--max_epochs", type=int, default=15)
@@ -192,7 +208,7 @@ def main(args):
     pl.seed_everything(args.seed)
     model = QuantileSNN(hparams=args)
     print(model)
-    if os.path.exists(args.checkpoint_dir) and os.listdir(args.checkpoint_dir):
+    if os.path.exists(args.checkpoint_dir) and os.listdir(args.checkpoint_dir) and not args.only_test:
         if not args.overwrite:
             raise RuntimeError("Experiment directory is not empty.")
         else:
@@ -200,18 +216,26 @@ def main(args):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         filepath=os.path.join(args.checkpoint_dir, "weights.pt"),
         save_top_k=1,
-        verbose=True,
         monitor="val_loss",
         mode="min")
     logger = pl.loggers.tensorboard.TensorBoardLogger(
         save_dir=os.path.join(args.checkpoint_dir, "logs"))
+    logger_csv = pl.loggers.CSVLogger(
+        save_dir=os.path.join(args.checkpoint_dir, "logs"))
     trainer = pl.Trainer(
-        logger=logger,
-        checkpoint_callback=checkpoint_callback,
+        logger=[logger, logger_csv],
+        callbacks=[checkpoint_callback],
         gpus=args.gpus,
         max_epochs=args.max_epochs,
         terminate_on_nan=True)
-    trainer.fit(model)
+
+    if not args.only_test:
+        trainer.fit(model)
+
+    ckpt = os.path.join(args.checkpoint_dir, "weights.pt.ckpt")
+    trainer.test(
+        model=QuantileSNN.load_from_checkpoint(ckpt),
+        verbose=True)
 
 
 if __name__ == "__main__":
