@@ -14,7 +14,7 @@ import torch.optim as optim
 import tqdm
 
 ExampleSet = collections.namedtuple(
-    "ExampleSet", ["scores", "target", "task"])
+    "ExampleSet", ["scores", "target", "task", "f_probs"])
 
 
 class DeepSet(nn.Module):
@@ -59,9 +59,10 @@ def construct_batch(batch):
 
     scores = torch.Tensor([x.scores for x in batch]).float()
     targets = torch.Tensor([x.target for x in batch]).float()
+    f_probs = torch.Tensor([x.f_probs for x in batch]).float()
 
     inputs = [scores, targets]
-    return inputs, tasks
+    return inputs, tasks, f_probs
 
 
 class QuantileSNN(pl.LightningModule):
@@ -84,7 +85,7 @@ class QuantileSNN(pl.LightningModule):
         return y_pred
 
     def forward(self, inputs):
-        targets = inputs[-1]
+        targets = inputs[1]
 
         y_pred = self.predict(
             scores=inputs[0])
@@ -94,7 +95,7 @@ class QuantileSNN(pl.LightningModule):
         return dict(loss=loss, preds=y_pred)
 
     def training_step(self, batch, batch_idx):
-        inputs, _ = batch
+        inputs, _, _ = batch
         outputs = self.forward(inputs)
         loss = outputs["loss"].mean()
         tensorboard_logs = {"train_loss": loss.detach()}
@@ -103,12 +104,12 @@ class QuantileSNN(pl.LightningModule):
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        inputs, _ = batch
+        inputs, _, _ = batch
         return self.forward(inputs)
 
     def test_step(self, batch, batch_idx):
-        inputs, _ = batch
-        return self.forward(inputs)
+        inputs, _, f_probs = batch
+        return self.forward(inputs), f_probs
 
     def validation_epoch_end(self, outputs):
         loss = torch.cat([x["loss"].detach() for x in outputs], dim=0).mean()
@@ -118,8 +119,17 @@ class QuantileSNN(pl.LightningModule):
         self.log("val_loss", loss)
         return
 
-    def test_epoch_end(self, outputs):
-        loss = torch.cat([x["loss"].detach() for x in outputs], dim=0).mean()
+    def test_epoch_end(self, results):
+        # results: [(outputs, f_probs)] * batches
+        output_path = os.path.join(self.hparams.checkpoint_dir, "predictions.jsonl")
+        with open(output_path, "w") as f:
+            for outputs, f_probs in results:
+                preds = outputs['preds'].tolist()
+                probs = f_probs.tolist()
+                for pred, input_probs in zip(preds, probs):
+                    f.write(json.dumps({'pred': pred, 'scores': input_probs}) + '\n')
+
+        loss = torch.cat([x[0]["loss"].detach() for x in results], dim=0).mean()
         tensorboard_logs = {"test_loss": loss}
         tqdm_dict = tensorboard_logs
         #return {"val_loss": loss, "progress_bar": tqdm_dict, "log": tensorboard_logs}
@@ -148,7 +158,8 @@ class QuantileSNN(pl.LightningModule):
                 scores = [-x for x in  line["s_probs"]]
                 target = np.quantile([-x for x in line["f_probs"]], alpha, interpolation="higher")
                 task = line["task"]
-                dataset.append(ExampleSet(scores, target, task))
+                f_probs = [-x for x in line["f_probs"]]
+                dataset.append(ExampleSet(scores, target, task, f_probs))
 
         return dataset
 
