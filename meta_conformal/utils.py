@@ -99,3 +99,15 @@ def exact_interval_classification(epsilon, calibration, test):
         if y_score <= quantile:
             pred_set.append(y)
     return pred_set
+
+
+def topk_interval_classification(test, k=5):
+    """Get the k highest scores.
+
+    Args:
+        test: [n_label]
+
+    Returns:
+       pred_sets: {y : y in top k}
+    """
+    return list(test.argsort()[:k])
