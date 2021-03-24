@@ -56,7 +56,10 @@ class FewShotSampler(torch.utils.data.Sampler):
         for _ in range(self.tasks_per_batch):
             task_idx = np.random.randint(0, len(self.indices))
             task_indices = self.indices[task_idx]
-            samples = np.random.permutation(len(task_indices))[:self.num_support + self.num_query]
+            if self.num_support + self.num_query <= len(task_indices):
+                samples = np.random.permutation(len(task_indices))[:self.num_support + self.num_query]
+            else:
+                samples = np.random.choice(len(task_indices), self.num_support + self.num_query)
             example_indices = [task_indices[i] for i in samples]
             batch_indices.extend(example_indices)
         return batch_indices

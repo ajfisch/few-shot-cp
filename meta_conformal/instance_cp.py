@@ -8,7 +8,7 @@ from scipy import stats
 from meta_conformal import utils
 
 
-def solve_correction(delta, ecdfs, bound="beta", steps=25):
+def solve_correction(delta, ecdfs, bound="dkw", steps=5):
     """Solve for correction giving (delta, epsilon)-validity."""
 
     def dkw(alpha, nobs, count):

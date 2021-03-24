@@ -2,8 +2,6 @@
 
 set -ex
 
-K=16
-
 declare -A epsilons=(
     ["0.95"]="0.90 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99"
     ["0.90"]="0.85 0.86 0.87 0.88 0.89 0.90 0.91 0.92 0.93 0.94 0.95"
@@ -21,9 +19,8 @@ declare -A epsilons=(
 for q in 95 90 80 70 60; do
     python meta_instance_cp.py \
            --num_trials 5000 \
-           --dataset_file "../ckpts/chembl/k=$K/conformal/q=0.$q/test.jsonl" \
-           --deltas 0 0.9 \
-           --tolerances ${epsilons["0.$q"]} \
-           --overwrite_results \
-           --threads 50
+           --dataset_file "../ckpts/fewrel/16_shot_10_way/q=0.$q/conf_val.jsonl" \
+           --deltas 0.9 \
+           --tolerances "0.$q" \
+           --threads 100
 done

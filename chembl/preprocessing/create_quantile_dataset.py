@@ -23,7 +23,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
     sampler = nonconformity.FewShotSampler(
         indices=indices,
         tasks_per_batch=args.batch_size,
-        num_support=model.hparams.num_support,
+        num_support=args.num_support,
         num_query=args.num_query,
         iters=args.num_samples_per_fold // args.batch_size)
     loader = torch.utils.data.DataLoader(
@@ -37,7 +37,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
     with torch.no_grad():
         for inputs, (smiles, tasks) in tqdm.tqdm(loader, desc="evaluating fold"):
             batch_size = args.batch_size
-            n_support = model.hparams.num_support
+            n_support = args.num_support
             dim = model.hparams.enc_hidden_size
 
             inputs = model.transfer_batch_to_device(inputs, model.device)
@@ -48,7 +48,7 @@ def run_fold(dataset_file, features_file, ckpt, args):
 
             # Encode molecules.
             (query, support, support_targets), query_targets = model.encode(
-                inputs, [args.batch_size, model.hparams.num_support, args.num_query])
+                inputs, [args.batch_size, args.num_support, args.num_query])
 
             # --------------------------------------------------------------------------
             # Step 1.
@@ -157,6 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="../data/chembl")
     parser.add_argument("--features_dir", type=str, default="../data/chembl/features")
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--num_support", type=int, default=16)
     parser.add_argument("--num_query", type=int, default=250)
     parser.add_argument("--num_samples_per_fold", type=int, default=20000)
     parser.add_argument("--num_data_workers", type=int, default=40)
