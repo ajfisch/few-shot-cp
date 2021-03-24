@@ -15,15 +15,6 @@ sns.set_style("white")
 sns.set_style("ticks")
 sns.despine()
 
-LINES = ["--", "-.", ":"]
-OURS_LINE = "-"
-SINGLE_LINE = ":"
-
-COLORS = [u"#1f77b4", u"#2ca02c", u"#9467bd", u"#8c564b",
-          u"#e377c2", u"#7f7f7f", u"#bcbd22", u"#17becf"]
-OURS_COLOR = u"#ff7f0e"
-SINGLE_COLOR = u"#d62728"
-
 
 flags.DEFINE_integer("dpi", 100,
                      "DPI for saving")
@@ -93,14 +84,14 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
 
     x = sorted(exact.keys())
     y = [exact[i][0][0] for i in x]
-    low = [exact[i][0][2] for i in all_x]
-    high = [exact[i][0][3] for i in all_x]
+    low = [exact[i][0][0] - exact[i][0][1] for i in all_x]
+    high = [exact[i][0][0] + exact[i][0][1] for i in all_x]
     plt.fill_between(x, low, high, alpha=0.2)
     plt.plot(x, y, '-.', label="Exact", linewidth=2)
 
     y = [all_y[i][0] for i in all_x]
-    low = [all_y[i][2] for i in all_x]
-    high = [all_y[i][3] for i in all_x]
+    low = [all_y[i][0] - all_y[i][1] for i in all_x]
+    high = [all_y[i][0] + all_y[i][1] for i in all_x]
     plt.fill_between(all_x, low, high, alpha=0.2)
     plt.plot(all_x, y, '-', label="Meta", linewidth=2)
 
@@ -137,14 +128,14 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
 
     x = sorted(exact.keys())
     y = [min(exact[i][1][0], 2*max_size) for i in x]
-    low = [exact[i][1][2] for i in x]
-    high = [exact[i][1][3] for i in x]
+    low = [exact[i][1][0] - exact[i][1][1] for i in all_x]
+    high = [exact[i][1][0] + exact[i][1][1] for i in all_x]
     plt.fill_between(x, low, high, alpha=0.2)
     plt.plot(x, y, '-.', label="Exact", linewidth=2)
 
     y = [min(all_y[i][0], 2*max_size) for i in all_x]
-    low = [all_y[i][2] for i in all_x]
-    high = [all_y[i][3] for i in all_x]
+    low = [all_y[i][0] - all_y[i][1] for i in all_x]
+    high = [all_y[i][0] + all_y[i][1] for i in all_x]
     plt.fill_between(all_x, low, high, alpha=0.2)
     plt.plot(all_x, y, '-', label="Meta", linewidth=2)
 
@@ -160,35 +151,71 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
     # Table.
     out_path = os.path.join(output_dir, "table_acc_size.txt")
     with open(out_path, 'w') as f:
-        f.write("1-eps & meta acc & exact acc & meta size & exact size\\\\ \n")
+        f.write("1-eps & exact acc & exact size & meta acc & meta size \\\\ \n")
         for q in meta.keys():
             qq = float(q)
             exact_values = exact[float(q)]
-            f.write("%2.2f & %2.2f & %2.2f & %2.2f & %2.2f \\\\ \n" % (qq, meta[q][qq][0][0], exact_values[0][0], meta[q][qq][1][0], exact_values[1][0]))
+            f.write("%2.2f & %2.2f & %2.2f & %2.2f & %2.2f \\\\ \n" % (qq, exact_values[0][0], exact_values[1][0], meta[q][qq][0][0], meta[q][qq][1][0]))
 
 def plot_quantile_convergence(output_dir, dpi=100):
-    ks = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-    path = "/data/rsg/nlp/tals/coverage/meta_cp/few-shot-cp/fewrel/results/10_way/k=%s/q=0.80/logs/default/version_1/metrics.csv"
+    task = 'mini_imagenet'
+    ks = [1,2,3,4,5,6,7,8]
+    path = "/data/rsg/nlp/tals/coverage/meta_cp/few-shot-cp/%s/results/10_way/k=%s/q=0.80/predictions.jsonl"
 
-    losses = []
-    for k in ks:
-        p = path % 2**k
-        with open(p, 'r') as f:
-            last_line = f.readlines()[-1].strip()
-        val_loss = float(last_line.split(',')[-1])
-        losses.append(val_loss)
-
-    x = ks
-    y = losses
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111)
-    ax.set_ylim(0.0, 1.05*max(y))
-    ax.set_xlim(0.9, 1.01*max(x))
-    plt.plot(x, y, '-', label="loss", linewidth=2)
-    plt.xlabel("$log_2(k)$")
-    plt.ylabel("Validation loss")
 
-    out_path = os.path.join(output_dir, "quantile_loss.png")
+    plt.plot([0,10], [0.8, 0.8], '--', label='Target $\\beta$', color='black')
+
+    means = []
+    stds= []
+    for k in ks:
+        p = path % (task, 2**k)
+        if os.path.exists(p):
+            qs = []
+            with open(p, 'r') as f:
+                for line in f.readlines():
+                    d = json.loads(line)
+#                     q = max(0, 0.8 - np.sum(np.array(d['scores']) <= d['pred']) / len(d['scores']))
+                    q = np.sum(np.array(d['scores']) <= d['pred']) / len(d['scores'])
+                    qs.append(q)
+
+            means.append(np.mean(qs))
+            stds.append(np.std(qs))
+
+    x = ks[:len(means)]
+    y = means
+    low = [y - s for (y,s) in zip(means, stds)]
+    high = [y + s for (y,s) in zip(means, stds)]
+
+    plt.plot(x, y, '-', label='Predicted quantile', linewidth=2)
+    plt.fill_between(x, low, high, alpha=0.2)
+
+    plt.xlabel("$log_2(k)$")
+    plt.ylabel("ECDF")
+    ax.set_ylim(0.0, 1)
+    ax.set_xlim(1, len(ks))
+    plt.legend(loc=4)
+
+    #losses = []
+    #for k in ks:
+    #    p = path % 2**k
+    #    with open(p, 'r') as f:
+    #        last_line = f.readlines()[-1].strip()
+    #    val_loss = float(last_line.split(',')[-1])
+    #    losses.append(val_loss)
+
+    #x = ks
+    #y = losses
+    #fig = plt.figure(figsize=(8, 6))
+    #ax = fig.add_subplot(111)
+    #ax.set_ylim(0.0, 1.05*max(y))
+    #ax.set_xlim(0.9, 1.01*max(x))
+    #plt.plot(x, y, '-', label="loss", linewidth=2)
+    #plt.xlabel("$log_2(k)$")
+    #plt.ylabel("Validation loss")
+
+    out_path = os.path.join(output_dir, "quantile.jpg")
     plt.tight_layout()
     plt.savefig(out_path, dpi=dpi)
     plt.close()
