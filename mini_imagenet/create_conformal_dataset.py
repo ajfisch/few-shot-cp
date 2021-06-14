@@ -242,8 +242,7 @@ def main(args):
     assert(args.n_calibration > args.n_query)
 
     # Load data
-    split = "val"
-    test_dataset = MiniImageNet(split, args.full_path, args.images_path)
+    test_dataset = MiniImageNet(args.split, args.full_path, args.images_path)
 
     # n_calibration instead of n_query so we'll have enough queries from
     # the calibration tasks.
@@ -287,5 +286,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_calibration", type=int, default=200)
     parser.add_argument("--num_data_workers", type=int, default=30)
     parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
+    parser.add_argument("--split", type=str, default="val")
     args = parser.parse_args()
     main(args)

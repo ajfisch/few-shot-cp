@@ -66,6 +66,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
 
     model.eval()
 
+    #torch.backends.cudnn.enabled = False
     cudnn.benchmark = True
 
     test_dataset = MiniImageNet(split, dataset_dir, images_dir)
@@ -85,7 +86,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
             data, tasks = [_.cuda(non_blocking=True) for _ in batch]
             tasks = tasks.tolist()
             p = args.n_support * args.n_way
-            data_support, data_query = data[:p], data[p:]
+            data_support, data_query = data[:p].contiguous(), data[p:].contiguous()
 
             # [n_support, n_way, model.out_channels]
             support_encodings = model(data_support).view(args.n_support, args.n_way, -1)
