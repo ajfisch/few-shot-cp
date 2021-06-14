@@ -1,4 +1,9 @@
-# Meta-Learned Few-Shot Conformal Prediction
+# Few Shot Conformal Prediction with Auxiliary Tasks
+
+## Abstract
+
+For many domains, pairing predictions with well-calibrated probabilities is important for quantifying uncertainty. For example, medical decisions would ideally be based on calculated probabilities that reflect reality. Unfortunately, for many of these tasks, in-domain data can be severely limited. Furthermore, ensuring calibrated probabilities for each possible outcome is hard; conformal prediction tackles the intermediate problem of assigning calibrated probabilities to sets of outcomes. In this project we are able to adapt conformal prediction to few-shot settings by casting it as a meta-learning paradigm over exchangeable collections of auxiliary tasks.
+
 
 ## Modeling
 
@@ -59,3 +64,18 @@ def forward(self, support_scores, support=None, query=None):
 In order to train for the epsilon-quantile overall, we need to optimize alpha * beta = epsilon. For conformalization on the task level, beta can only go as high as 1 - (1 / num_calibration_tasks). Generally will want to hyper-parameter sweep 1 - (i / num_calibration_tasks) for i in [1, 2, 3, ..., 10].
 
 3. Compute nonconformity scores + quantiles on test data. Apply conformal prediction.
+
+
+## Citation
+
+If you use this in your work please cite:
+
+```
+@inproceedings{fisch2021fewshot,
+    title={Few-shot Conformal Prediction with Auxiliary Tasks},
+    author={Adam Fisch and Tal Schuster and Tommi Jaakkola and Regina Barzilay},
+    booktitle={Proceedings of The Thirty-eighth International Conference on Machine Learning},
+    year={2021},
+}
+```
+    
