@@ -1,4 +1,4 @@
-[submodule "mini_imagenet/prototypical-networks"]
+[submodule "mini_imagenet/prototypical_networks"]
 	path = mini_imagenet/prototypical_networks
 	url = https://github.com/TalSchuster/prototypical-networks
 [submodule "fewrel/FewRel"]
