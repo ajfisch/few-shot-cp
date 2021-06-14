@@ -29,7 +29,7 @@ from FewRel.models.mtb import Mtb
 
 
 parser = argparse.ArgumentParser(description='Pytorch Prototypical Networks Testing')
-parser.add_argument("--output_dir", type=str, default="results/")
+parser.add_argument("--output_dir", type=str, default="results/10_way")
 parser.add_argument('--splits_path', type=str, default="FewRel/data/wiki_5_splits/", help='path to dir with per fold subdirs of json files containing train/dev/test examples')
 parser.add_argument('--full_path', type=str, default="FewRel/data/", help='path to dir with full data json files containing train/dev/test examples')
 parser.add_argument('--model', default='proto',
@@ -44,14 +44,14 @@ parser.add_argument('--n_support', default=16, type=int, help='Number of support
 parser.add_argument('--n_query', default=100, type=int, help='Number of query samples')
 parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     default=[
-                    "/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-wiki_5_splits__0__train-wiki_5_splits__0__val-10-10-0.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-wiki_5_splits__1__train-wiki_5_splits__1__val-10-10-1.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-wiki_5_splits__2__train-wiki_5_splits__2__val-10-10-2.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-wiki_5_splits__3__train-wiki_5_splits__3__val-10-10-3.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-wiki_5_splits__4__train-wiki_5_splits__4__val-10-10-4.pth.tar"
+                    "FewRel/checkpoint/proto-cnn-wiki_5_splits__0__train-wiki_5_splits__0__val-10-10-0.pth.tar",
+                    "FewRel/checkpoint/proto-cnn-wiki_5_splits__1__train-wiki_5_splits__1__val-10-10-1.pth.tar",
+                    "FewRel/checkpoint/proto-cnn-wiki_5_splits__2__train-wiki_5_splits__2__val-10-10-2.pth.tar",
+                    "FewRel/checkpoint/proto-cnn-wiki_5_splits__3__train-wiki_5_splits__3__val-10-10-3.pth.tar",
+                    "FewRel/checkpoint/proto-cnn-wiki_5_splits__4__train-wiki_5_splits__4__val-10-10-4.pth.tar"
                              ])
 parser.add_argument("--full_ckpt", type=str,
-                    default="/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-train_wiki-val_wiki-10-10.pth.tar")
+                    default="FewRel/checkpoint/proto-cnn-train_wiki-val_wiki-10-10.pth.tar")
 
 parser.add_argument('--batch_size', default=1, type=int,
         help='batch size')
