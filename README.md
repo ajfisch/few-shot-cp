@@ -42,7 +42,6 @@ def forward(self, query, support, support_targets):
         scores: <float>[tasks_per_batch, n_query]
                Nonconformity scores for the query points.
     """
-    ...
 ```
 
 The important thing is to return the nonconformity scores.
@@ -98,7 +97,7 @@ instance_cp.evaluate_trials(
     #    support_encs: list of k support encodings (i.e., for RRCM baseline prediction).
     #    support_targets: list of k support prediction targets.
     #    query_encs: list of n_calibration prediction targets.
-    #    ...
+    #    ... (other fields possible, see examples) ...
     #    l2_lambda: Optional l2 parameter used for regression tasks (from R2D2).
     tasks=tasks,
     
