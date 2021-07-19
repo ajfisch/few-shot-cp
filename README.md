@@ -19,7 +19,8 @@ Each tasks build upon existing meta-learning architectures for few-shot learning
 
 Each subdirectory contains instructions for their respective tasks. In general, for a new task, we use the following procedure:
 
-1. Train a nonconformity measure using a standard meta-learned few-shot learning algorithm.
+### Meta nonconformity measures
+Train a nonconformity measure using a standard meta-learned few-shot learning algorithm.
 
 Example API is:
 
@@ -46,7 +47,8 @@ def forward(self, query, support, support_targets):
 
 The important thing is to return the nonconformity scores.
 
-2. Train quantiles. Train using nonconformity scores measure on K - 1 support labels (leave-out-one). One could also add encodings of inputs as well (like context augmentation in [adaptive risk minimization](https://arxiv.org/abs/2007.02931)). Train for 0.95/0.9/0.8/0.7/0.6 quantiles.
+### Meta quantile predictors
+Train quantile predictors. Train using nonconformity scores measure on K - 1 support labels (leave-out-one). One could also add encodings of inputs as well (like context augmentation in [adaptive risk minimization](https://arxiv.org/abs/2007.02931)). Train for 0.95/0.9/0.8/0.7/0.6 quantiles.
 
 Example API:
 
@@ -71,7 +73,8 @@ def forward(self, support_scores, support=None, query=None):
     ...
 ```
 
-3. Compute calibration of nonconformity scores + quantiles on test data. This uses the `meta_conformal` prediction functions.
+### Meta calibration
+Compute calibration of nonconformity scores + quantiles on test data. This uses the `meta_conformal` prediction functions.
 
 The important thing to note is that validity scores are computed based on marginalizing over task and task examples (for calibration/support vs test). For each task, we compute a batch of examples with different support/test splits and record their scores (see `create_conformal_dataset` in each of the subdirectories). After this is done, the main access point for calculating results is via importing:
 
