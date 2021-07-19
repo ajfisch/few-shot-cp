@@ -13,7 +13,7 @@ Efficient implementations of online predictors for the tasks considered here mig
 
 ## Modeling
 
-Each tasks build upon existing meta-learning architectures for few-shot learning. The classification tasks (`fewrel`, `mini_imagenet`) both use [prototypical networks](https://arxiv.org/abs/1703.05175), while the regression task (`chembl`) uses the [R2D2 framework](https://openreview.net/forum?id=HyxnZh0ct7),
+Each tasks build upon existing meta-learning architectures for few-shot learning. The classification tasks (`fewrel`, `mini_imagenet`) both use [prototypical networks](https://arxiv.org/abs/1703.05175), while the regression task (`chembl`) uses the [R2D2 framework](https://openreview.net/forum?id=HyxnZh0ct7).
 
 ## Task Instructions
 
