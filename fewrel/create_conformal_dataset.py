@@ -265,17 +265,17 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn/q=0.70/weights.pt.ckpt")
-    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/meta_cp/FewRel/checkpoint/proto-cnn-train_wiki-val_wiki-10-10.pth.tar")
+    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn/q=0.80/weights.pt.ckpt")
+    parser.add_argument("--s_ckpt", type=str, default="FewRel/checkpoint/proto-cnn-train_wiki-val_wiki-10-10.pth.tar")
     parser.add_argument('--full_path', type=str, default="FewRel/data/", help='path to dir with full data json files containing train/dev/test examples')
     parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
     parser.add_argument("--n_support", type=int, default=16)
     parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
-    parser.add_argument("--alpha", type=float, default=0.70)
+    parser.add_argument("--alpha", type=float, default=0.80)
     parser.add_argument("--n_query", type=int, default=5)
     parser.add_argument("--n_calibration", type=int, default=200)
     parser.add_argument("--workers", type=int, default=30)
-    parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
+    parser.add_argument("--output_file", type=str, default="results/10_way/quantile_snn/0.80/conf_val.jsonl")
 
     parser.add_argument('--model', default='proto',
             help='model name')

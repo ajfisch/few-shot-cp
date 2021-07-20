@@ -242,8 +242,7 @@ def main(args):
     assert(args.n_calibration > args.n_query)
 
     # Load data
-    split = "val"
-    test_dataset = MiniImageNet(split, args.full_path, args.images_path)
+    test_dataset = MiniImageNet(args.split, args.full_path, args.images_path)
 
     # n_calibration instead of n_query so we'll have enough queries from
     # the calibration tasks.
@@ -274,11 +273,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn/q=0.70/weights.pt.ckpt")
-    parser.add_argument("--s_ckpt", type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way/model_best_acc.pth.tar")
+    parser.add_argument("--q_ckpt", type=str, default="results/10_way/quantile_snn/q=0.80/weights.pt.ckpt")
+    parser.add_argument("--s_ckpt", type=str, default="models_trained/mini_imagenet_10_shot_10_way/model_best_acc.pth.tar")
 
-    parser.add_argument('--images_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to parent dir with "images" dir.')
-    parser.add_argument('--full_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
+    parser.add_argument('--images_path', type=str, default="mini_imagenet", help='path to parent dir with "images" dir.')
+    parser.add_argument('--full_path', type=str, default="mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
     parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
     parser.add_argument("--n_support", type=int, default=16)
     parser.add_argument('--n_way', default=10, type=int, help='Number of classes per episode')
@@ -286,6 +285,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_query", type=int, default=5)
     parser.add_argument("--n_calibration", type=int, default=200)
     parser.add_argument("--num_data_workers", type=int, default=30)
-    parser.add_argument("--output_file", type=str, default="tmp/tmp_val.jsonl")
+    parser.add_argument("--output_file", type=str, default="results/10_way/quantile_snn/q=0.80/conf_val.jsonl")
+    parser.add_argument("--split", type=str, default="val")
     args = parser.parse_args()
     main(args)

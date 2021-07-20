@@ -96,14 +96,14 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_file", type=str,
-                        default="../ckpts/mini_imagenet/16_shot_10_way/q=0.70/conf_val.jsonl")
+                        default="results/10_way/quantile_snn/q=0.80/conf_val.jsonl")
     parser.add_argument("--output_file", type=str, default=None)
     parser.add_argument("--trials_file", type=str, default=None)
     parser.add_argument("--num_trials", type=int, default=2000)
     parser.add_argument("--overwrite_trials", action="store_true")
     parser.add_argument("--overwrite_results", action="store_true")
-    parser.add_argument("--tolerances", nargs="+", type=float, default=[.70])
+    parser.add_argument("--tolerances", nargs="+", type=float, default=[.80])
     parser.add_argument("--deltas", nargs="+", type=float, default=[0])
-    parser.add_argument("--threads", type=int, default=35)
+    parser.add_argument("--threads", type=int, default=30)
     args = parser.parse_args()
     main(args)

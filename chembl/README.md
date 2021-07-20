@@ -1,24 +1,8 @@
 # ChEMBL Regression Experiments
 
 
-Every data point that has a pChEMBL value (i.e., a normalized log activity value, see https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/chembl-data-questions#what-is-pchembl), and then it averages duplicates and filters to only include assays with at least X number of molecules).
+Every data point that has a pChEMBL value (i.e., a normalized log activity value, see https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/chembl-data-questions#what-is-pchembl). Initial preprocessing from the ChEMBL dataset averaged duplicates and filters to only include assays with at least 100 molecules.
 
-Different variations:
-
-Minimum number of molecules per assay = 100
-Number of assays = 1,499
-Number of molecules = 1,661,044
-Path = /data/rsg/chemistry/swansonk/antibiotic_moa/data/pchembl_100.csv
-
-Minimum number of molecules per assay = 1000
-Number of assays = 120
-Number of molecules = 1,336,684
-Path = /data/rsg/chemistry/swansonk/antibiotic_moa/data/pchembl_1000.csv
-
-Minimum number of molecules per assay = 10000
-Number of assays = 38
-Number of molecules = 1,058,663
-Path = /data/rsg/chemistry/swansonk/antibiotic_moa/data/pchembl_10000.csv
 
 ## Preprocessing
 
@@ -31,6 +15,8 @@ Creates chembl dataset folds. Molecules are grouped by assay and filtered to hav
 Creates chembl rdkit features for molecules.
 
 Outputs are saved to `../data/chembl`.
+
+Our preprocessed folds are available for download [here](https://people.csail.mit.edu/fisch/assets/data/few-shot-cp/chembl.tar.gz).
 
 ## Train Nonconformity Measure
 

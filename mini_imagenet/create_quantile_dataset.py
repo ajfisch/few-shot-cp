@@ -28,14 +28,14 @@ model_names = sorted(name for name in models.__dict__
 model_names.append('default_convnet')
 
 parser = argparse.ArgumentParser(description='Pytorch Prototypical Networks Testing')
-parser.add_argument("--output_dir", type=str, default="results/")
-parser.add_argument('--splits_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet_5_splits", help='path to dir with per fold subdirs of csv files containing train/dev/test examples')
-parser.add_argument('--full_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
-parser.add_argument('--images_path', type=str, default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/mini_imagenet", help='path to parent dir with "images" dir.')
+parser.add_argument("--output_dir", type=str, default="results/10_way")
+parser.add_argument('--splits_path', type=str, default="mini_imagenet_5_splits", help='path to dir with per fold subdirs of csv files containing train/dev/test examples')
+parser.add_argument('--full_path', type=str, default="mini_imagenet", help='path to dir with full data csv files containing train/dev/test examples')
+parser.add_argument('--images_path', type=str, default="mini_imagenet", help='path to parent dir with "images" dir.')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='default_convnet',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
-parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=10, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--evaluation_name', type=str, help='Evaluation name')
 parser.add_argument('--n_episodes', default=2000, type=int, help='Number of episodes to average')
@@ -44,14 +44,14 @@ parser.add_argument('--n_support', default=16, type=int, help='Number of support
 parser.add_argument('--n_query', default=100, type=int, help='Number of query samples')
 parser.add_argument("--fold_ckpts", type=str, nargs="+",
                     default=[
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way_split_0/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way_split_1/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way_split_2/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way_split_3/model_best_acc.pth.tar",
-                    "/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way_split_4/model_best_acc.pth.tar",
+                    "models_trained/mini_imagenet_10_shot_10_way_split_0/model_best_acc.pth.tar",
+                    "models_trained/mini_imagenet_10_shot_10_way_split_1/model_best_acc.pth.tar",
+                    "models_trained/mini_imagenet_10_shot_10_way_split_2/model_best_acc.pth.tar",
+                    "models_trained/mini_imagenet_10_shot_10_way_split_3/model_best_acc.pth.tar",
+                    "models_trained/mini_imagenet_10_shot_10_way_split_4/model_best_acc.pth.tar",
                              ])
 parser.add_argument("--full_ckpt", type=str,
-                    default="/data/rsg/nlp/tals/coverage/models/prototypical-networks/models_trained/mini_imagenet_10_shot_10_way/model_best_acc.pth.tar")
+                    default="models_trained/mini_imagenet_10_shot_10_way/model_best_acc.pth.tar")
 
 def run_fold(dataset_dir, images_dir, ckpt, split, args):
     # Load model
@@ -66,6 +66,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
 
     model.eval()
 
+    #torch.backends.cudnn.enabled = False
     cudnn.benchmark = True
 
     test_dataset = MiniImageNet(split, dataset_dir, images_dir)
@@ -85,7 +86,7 @@ def run_fold(dataset_dir, images_dir, ckpt, split, args):
             data, tasks = [_.cuda(non_blocking=True) for _ in batch]
             tasks = tasks.tolist()
             p = args.n_support * args.n_way
-            data_support, data_query = data[:p], data[p:]
+            data_support, data_query = data[:p].contiguous(), data[p:].contiguous()
 
             # [n_support, n_way, model.out_channels]
             support_encodings = model(data_support).view(args.n_support, args.n_way, -1)

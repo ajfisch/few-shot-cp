@@ -87,13 +87,13 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
     low = [exact[i][0][0] - exact[i][0][1] for i in all_x]
     high = [exact[i][0][0] + exact[i][0][1] for i in all_x]
     plt.fill_between(x, low, high, alpha=0.2)
-    plt.plot(x, y, '-.', label="Exact", linewidth=2)
+    plt.plot(x, y, '-.', label="Baseline CP", linewidth=2)
 
     y = [all_y[i][0] for i in all_x]
     low = [all_y[i][0] - all_y[i][1] for i in all_x]
     high = [all_y[i][0] + all_y[i][1] for i in all_x]
     plt.fill_between(all_x, low, high, alpha=0.2)
-    plt.plot(all_x, y, '-', label="Meta", linewidth=2)
+    plt.plot(all_x, y, '-', label="Meta CP", linewidth=2)
 
     plt.xlabel("1 - $\epsilon$")
     plt.ylabel("Accuracy")
@@ -131,13 +131,13 @@ def plot_task(qs, results_path, task_name, output_dir, max_size=10, dpi=100):
     low = [exact[i][1][0] - exact[i][1][1] for i in all_x]
     high = [exact[i][1][0] + exact[i][1][1] for i in all_x]
     plt.fill_between(x, low, high, alpha=0.2)
-    plt.plot(x, y, '-.', label="Exact", linewidth=2)
+    plt.plot(x, y, '-.', label="Baseline CP", linewidth=2)
 
     y = [min(all_y[i][0], 2*max_size) for i in all_x]
     low = [all_y[i][0] - all_y[i][1] for i in all_x]
     high = [all_y[i][0] + all_y[i][1] for i in all_x]
     plt.fill_between(all_x, low, high, alpha=0.2)
-    plt.plot(all_x, y, '-', label="Meta", linewidth=2)
+    plt.plot(all_x, y, '-', label="Meta CP", linewidth=2)
 
     plt.xlabel("1 - $\epsilon$")
     plt.ylabel("Size")
