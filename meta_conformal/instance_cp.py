@@ -230,6 +230,7 @@ def evaluate_trial(task_idx, epsilon, delta, task_type, top_ks=[1,3,5]):
 
     # Evaluate exact CP baseline.
     exact_preds = []
+    naive_preds = []
     topk_preds = {k: [] for k in top_ks}
     for i in range(n_test):
         if task_type == "classification":
@@ -238,7 +239,8 @@ def evaluate_trial(task_idx, epsilon, delta, task_type, top_ks=[1,3,5]):
                 calibration=test["exact_non_comfs"][i],
                 test=test["exact_pred_scores"][i])
             for k in top_ks:
-                topk_preds[k].append(utils.topk_interval_classification(test["exact_pred_scores"][i], k=k))
+                topk_preds[k].append(utils.topk_interval_classification(test["query_scores"][i], k=k))
+            naive_preds.append(utils.naive_interval_classification(-test["query_scores"][i], epsilon))
         else:
             exact_pred = utils.exact_interval_regression(
                 epsilon=epsilon,
@@ -249,11 +251,12 @@ def evaluate_trial(task_idx, epsilon, delta, task_type, top_ks=[1,3,5]):
         exact_preds.append(exact_pred)
     exact_result = utils.evaluate(test["query_targets"], exact_preds, task_type, n_test)
     topk_results = {}
+    naive_result = None
     if task_type == "classification":
         for k in top_ks:
             topk_results[k] = utils.evaluate(test["query_targets"], topk_preds[k], task_type, n_test)
-
-    return meta_result, exact_result, topk_results
+        naive_result = utils.evaluate(test["query_targets"], naive_preds, task_type, n_test)
+    return meta_result, exact_result, topk_results, naive_result
 
 
 def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification", threads=1, top_ks=[1,3,5]):
@@ -268,6 +271,7 @@ def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification
     """
     meta_results = []
     exact_results = []
+    naive_results = []
     topk_results = {k: [] for k in top_ks}
 
     if task_type not in ["classification", "regression"]:
@@ -291,22 +295,24 @@ def evaluate_trials(trials, tasks, epsilon, delta=0.9, task_type="classification
 
     # Map all results.
     with tqdm.tqdm(total=len(trials)) as pbar:
-        for meta_result, exact_result, topk_result in map_fn(worker_fn, trials):
+        for meta_result, exact_result, topk_result, naive_result in map_fn(worker_fn, trials):
             meta_results.append(meta_result)
             exact_results.append(exact_result)
             if task_type == "classification":
                 for k in top_ks:
                     topk_results[k].append(topk_result[k])
+                naive_results.append(naive_result)
             pbar.update()
 
     # Marginal results.
     avg_meta_result = utils.compute_stats(meta_results)
     avg_exact_result = utils.compute_stats(exact_results)
     avg_topk_result = {k: utils.compute_stats(v) for k, v in topk_results.items()}
-
+    avg_naive_result = utils.compute_stats(naive_results)
     aggr_results = dict(meta=avg_meta_result, exact=avg_exact_result)
     if task_type == "classification":
         for k in top_ks:
             aggr_results[f"top-{k}"] = avg_topk_result[k]
+        aggr_results["naive"] = avg_naive_result
 
     return aggr_results

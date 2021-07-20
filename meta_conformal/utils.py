@@ -111,3 +111,17 @@ def topk_interval_classification(test, k=5):
        pred_sets: {y : y in top k}
     """
     return list(test.argsort()[:k])
+
+
+def naive_interval_classification(test, epsilon):
+    # Check that is a valid prob distr.
+    inds = (-test).argsort()
+    preds = []
+    prob_mass = 0
+    for i in inds:
+        if prob_mass >= 1 - epsilon:
+            break
+        preds.append(i)
+        prob_mass += test[i]
+
+    return preds
